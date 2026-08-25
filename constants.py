@@ -1,6 +1,7 @@
 import struct 
 
 HOST = ""
+IP = "192.168.0.6"
 PORT = 30000
 MSG_LEN_FORMAT = ">H"
 HEADER_SIZE = 20
@@ -14,3 +15,5 @@ assert HEADER_SIZE == 20
  
 MSG_LEN_FORMAT = ">H"      # big-endian uint16 length prefix per message
 MSG_LEN_SIZE = struct.calcsize(MSG_LEN_FORMAT)  
+
+RETRANSMIT_PORT = 30001
