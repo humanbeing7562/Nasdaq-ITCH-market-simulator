@@ -14,7 +14,7 @@ BODY_FORMAT = ">H"
 REQUEST_FORMAT = ">10sQH"
 
 RETRANSMIT_PORT = 30001
-BROKEN_SEQUENCES = {50, 120, 121}   # hardcoded, withheld on purpose
+BROKEN_SEQUENCES = {50, 120, 121, 123, 125}   # hardcoded, withheld on purpose
 broken_packets = {}                  
 
 

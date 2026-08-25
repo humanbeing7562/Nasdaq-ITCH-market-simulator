@@ -1,3 +1,4 @@
-import itch.messages as m
 import inspect
-print(inspect.getsource(m.OrderDeleteMessage))
+import itch
+# print(inspect.getsource(m.OrderDeleteMessage))
+print(itch.USING_CPP_BACKEND)
