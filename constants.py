@@ -1,7 +1,7 @@
 import struct 
 
 HOST = ""
-IP = "192.168.0.6"
+IP = "192.168.0.7"
 PORT = 30000
 MSG_LEN_FORMAT = ">H"
 HEADER_SIZE = 20

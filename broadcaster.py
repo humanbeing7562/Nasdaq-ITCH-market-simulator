@@ -2,12 +2,12 @@ import struct
 import socket
 import threading
 from itch.parser import MessageParser
-
+from constants import *
 
 parser = MessageParser()
 MESSAGE_COUNT = 1
 SESSION_ID = b"0020190130"
-itch_file_path = '../data/01302019.NASDAQ_ITCH50'
+itch_file_path = 'data/01302019.NASDAQ_ITCH50'
 
 HEADER_FORMAT = ">10sQH"
 BODY_FORMAT = ">H"
@@ -17,7 +17,6 @@ RETRANSMIT_PORT = 30001
 BROKEN_SEQUENCES = {50, 120, 121, 123, 125}   # hardcoded, withheld on purpose
 broken_packets = {}                  
 
-
 def read_and_pack(itch_file_path=itch_file_path):
     with open(itch_file_path, 'rb') as itch_file:
         for sequence, message in enumerate(parser.parse_file(itch_file), start=1):
@@ -26,7 +25,6 @@ def read_and_pack(itch_file_path=itch_file_path):
             body = struct.pack(BODY_FORMAT, length) + message.to_bytes()
             full_packet = header + body
             yield sequence, full_packet, message.timestamp
-
 
 import time
 
@@ -41,7 +39,7 @@ def spin_wait_until(target_ns, threshold_ns=2_000_000):
         pass
 
 
-def retransmit_server(bind_ip="192.168.0.6"):
+def retransmit_server(bind_ip=IP):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((bind_ip, RETRANSMIT_PORT))
     print("Retransmit server listening...")
@@ -60,7 +58,7 @@ def retransmit_server(bind_ip="192.168.0.6"):
 def broadcast(itch_file_path=itch_file_path, speed=1000):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
-    sock.bind(("192.168.0.6", 0))
+    sock.bind((IP, 0))
 
     threading.Thread(target=retransmit_server, daemon=True).start()
 

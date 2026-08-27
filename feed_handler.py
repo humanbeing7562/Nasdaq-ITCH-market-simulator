@@ -9,6 +9,8 @@ import multiprocessing
 from events import *
 import time
 import threading
+from ring_buffer import *
+from multiprocessing import shared_memory
 
 
 HOST = ""
@@ -17,25 +19,37 @@ PORT = 30000
 MSG_LEN_FORMAT = ">H"
 HEADER_SIZE = 20
 from datetime import datetime
+
+from enum import IntEnum
+
+class Action(IntEnum):
+    ADD = 1
+    CANCEL = 2
+    DELETE = 3
+    EXECUTE = 4
+    R_CANCEL = 5
+    R_ADD = 6
+    
+class Side(IntEnum):
+    BID = 0
+    ASK = 1
     
 
 def receiver(raw_queue):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((HOST, PORT))
-    mreq = socket.inet_aton("229.0.0.1") + socket.inet_aton("192.168.0.6")
+    mreq = socket.inet_aton("229.0.0.1") + socket.inet_aton(IP)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 20)
     print("Listening now...")
-    expected = 1
     while True:
         packet = sock.recv(1500)
-        seq = struct.unpack_from(">10xQ", packet, 0)[0]
-        if seq == 51 and seq > expected :
-            print(f"RECEIVER SAW GAP: expected {expected}, got {seq} (missing {seq - expected})")
-        expected = max(expected, seq + 1)
         raw_queue.put((time.time_ns(), packet))
 
-def processor(raw_queue):
+def processor(raw_queue, shm_name, capacity):
+
+    shm = shared_memory.SharedMemory(name=shm_name, create=False)
+    ring = Ring(shm, capacity)
 
     def retransmit_listener(sock, raw_queue):
             while True:
@@ -72,7 +86,16 @@ def processor(raw_queue):
             "price": msg.price,
             "quantity": msg.shares,
         }
-        event = Event("ADD", msg.timestamp, ts_recv, sequence, msg.order_reference_number, msg.shares, msg.buy_sell_indicator, instrument, msg.price)
+        event = ring.write(
+            (Action.R_ADD, 
+             msg.timestamp, 
+             ts_recv, sequence, 
+             msg.order_reference_number, 
+             msg.shares, 
+             Side.BID if msg.buy_sell_indicator == b"B" else Side.ASK, 
+             msg.stock_locate, 
+             msg.price)
+        )
         return [event]
         
 
@@ -185,17 +208,41 @@ def processor(raw_queue):
             _, buf_seq, buf_count = struct.unpack(HEADER_FORMAT, buf_packet[:HEADER_SIZE])
             parse_and_apply(buf_seq, buf_count, buf_packet, buf_ts_recv, offset=0)
 
+
+def consumer(shm_name, capacity):
+    shm = shared_memory.SharedMemory(name=shm_name, create=False)
+    ring = Ring(shm, capacity)
+    cursor = 0
+    count = 0
+    lapped_count = 0
+    print("Consumer listening now...")
+    while True:
+        result = ring.read(cursor)
+        if result is None:
+            continue
+        cursor += 1
+        count += 1
+        if isinstance(result, tuple) and result[0] == "LAPPED":
+            lapped_count += 1
+        if count % 10000 == 0:
+            print(f"consumed {count} | seq={result['sequence']} price={result['price']} qty={result['quantity']} side={result['side']}")
+            print(lapped_count)
     
 def main():
-    
+
+    capacity = 1024
+    shm_size =  8 + (capacity * EVENT.itemsize)
+    shm = shared_memory.SharedMemory(create=True, size=shm_size)
+
     raw_queue = multiprocessing.Queue()
 
     receiver_process = multiprocessing.Process(target=receiver, args=(raw_queue,), daemon=True)
-    processor_process = multiprocessing.Process(target=processor, args=(raw_queue,), daemon=True)
+    processor_process = multiprocessing.Process(target=processor, args=(raw_queue, shm.name, capacity), daemon=True)
+    consumer_process = multiprocessing.Process(target=consumer, args=(shm.name, capacity), daemon=True)
 
     receiver_process.start()
     processor_process.start()
-
+    consumer_process.start()
     receiver_process.join()
 
        
