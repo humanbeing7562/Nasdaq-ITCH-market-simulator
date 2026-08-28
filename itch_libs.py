@@ -1,4 +1,5 @@
 import inspect
 import itch
+from itch.messages import *
 # print(inspect.getsource(m.OrderDeleteMessage))
-print(itch.USING_CPP_BACKEND)
+print(dir(OrderReplaceMessage))

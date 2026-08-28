@@ -18,7 +18,6 @@ PORT = 30000
 
 MSG_LEN_FORMAT = ">H"
 HEADER_SIZE = 20
-from datetime import datetime
 
 from enum import IntEnum
 
@@ -79,15 +78,15 @@ def processor(raw_queue, shm_name, capacity):
     @handle_message.register(AddOrderNoMPIAttributionMessage)
     @handle_message.register(AddOrderMPIDAttribution)
     def _(msg, sequence, ts_recv):
-        instrument = instrument_directory.symbol_for(msg.stock_locate)
-        orders[msg.order_reference_number] = {
-            "instrument": instrument,
-            "side": msg.buy_sell_indicator,
-            "price": msg.price,
-            "quantity": msg.shares,
-        }
+        # instrument = instrument_directory.symbol_for(msg.stock_locate)
+        # orders[msg.order_reference_number] = {
+        #     "instrument": instrument,
+        #     "side": msg.buy_sell_indicator,
+        #     "price": msg.price,
+        #     "quantity": msg.shares,
+        # }
         event = ring.write(
-            (Action.R_ADD, 
+            (Action.ADD, 
              msg.timestamp, 
              ts_recv, sequence, 
              msg.order_reference_number, 
@@ -101,47 +100,100 @@ def processor(raw_queue, shm_name, capacity):
 
     @handle_message.register(OrderExecutedMessage)
     def _(msg, sequence, ts_recv):
-        current_quantity = orders[msg.order_reference_number]["quantity"]
-        order_quantity = msg.executed_shares
-        side = orders[msg.order_reference_number]["side"]
-        price = orders[msg.order_reference_number]["price"]
-        if order_quantity >= current_quantity:
-            del orders[msg.order_reference_number]
-        else:
-            orders[msg.order_reference_number]["quantity"] -= msg.executed_shares
-        instrument = instrument_directory.symbol_for(msg.stock_locate)
-        event = Event("EXECUTE", msg.timestamp, ts_recv, sequence, msg.order_reference_number, order_quantity, side, instrument, price)
+        # current_quantity = orders[msg.order_reference_number]["quantity"]
+        # order_quantity = msg.executed_shares
+        # side = orders[msg.order_reference_number]["side"]
+        # price = orders[msg.order_reference_number]["price"]
+        # if order_quantity >= current_quantity:
+        #     del orders[msg.order_reference_number]
+        # else:
+        #     orders[msg.order_reference_number]["quantity"] -= msg.executed_shares
+        # instrument = instrument_directory.symbol_for(msg.stock_locate)
+        # event = Event("EXECUTE", msg.timestamp, ts_recv, sequence, msg.order_reference_number, order_quantity, side, instrument, price)
+
+        event = ring.write(
+                    (Action.EXECUTE, 
+                     msg.timestamp, 
+                     ts_recv, sequence, 
+                     msg.order_reference_number, 
+                     msg.executed_shares, 
+                     255, # no bid/side ask for executed message
+                     msg.stock_locate, 
+                     -1) # no price for executed message
+                )
         return [event]
 
     @handle_message.register(OrderCancelMessage)
     def _(msg, sequence, ts_recv):
-        instrument = instrument_directory.symbol_for(msg.stock_locate)
-        orders[msg.order_reference_number]["quantity"] -= msg.cancelled_shares
-        event = Event("CANCEL", msg.timestamp, ts_recv, sequence, msg.order_reference_number, msg.cancelled_shares, orders[msg.order_reference_number]["side"], instrument, orders[msg.order_reference_number]["price"])
+        # instrument = instrument_directory.symbol_for(msg.stock_locate)
+        # orders[msg.order_reference_number]["quantity"] -= msg.cancelled_shares
+        # event = Event("CANCEL", msg.timestamp, ts_recv, sequence, msg.order_reference_number, msg.cancelled_shares, orders[msg.order_reference_number]["side"], instrument, orders[msg.order_reference_number]["price"])
+        event = ring.write(
+                    (Action.CANCEL, 
+                    msg.timestamp, 
+                    ts_recv, sequence, 
+                    msg.order_reference_number, 
+                    msg.cancelled_shares, 
+                    255, # no bid/side ask for cancelled message
+                    msg.stock_locate, 
+                    -1) # no price for cancelled message
+                )
+    
         return [event]
  
     @handle_message.register(OrderReplaceMessage)
     def _(msg, sequence, ts_recv):
-        old_entry = orders.pop(msg.order_reference_number)
-        instrument = instrument_directory.symbol_for(msg.stock_locate)
-        orders[msg.new_order_reference_number] = {
-                "instrument": old_entry["instrument"],
-                "side": old_entry["side"],
-                "price": msg.price,
-                "quantity": msg.shares,
-            }
-        event_cancel = Event("R-CANCEL", msg.timestamp, ts_recv, sequence, msg.order_reference_number, old_entry["quantity"], old_entry["side"], instrument, old_entry["price"])
-        event_add = Event("R-ADD", msg.timestamp, ts_recv, sequence, msg.new_order_reference_number, msg.shares, old_entry["side"], instrument, msg.price)
+        # old_entry = orders.pop(msg.order_reference_number)
+        # instrument = instrument_directory.symbol_for(msg.stock_locate)
+        # orders[msg.new_order_reference_number] = {
+        #         "instrument": old_entry["instrument"],
+        #         "side": old_entry["side"],
+        #         "price": msg.price,
+        #         "quantity": msg.shares,
+        #     }
+        # event_cancel = Event("R-CANCEL", msg.timestamp, ts_recv, sequence, msg.order_reference_number, old_entry["quantity"], old_entry["side"], instrument, old_entry["price"])
+        # event_add = Event("R-ADD", msg.timestamp, ts_recv, sequence, msg.new_order_reference_number, msg.shares, old_entry["side"], instrument, msg.price)
+        event_cancel = ring.write(
+                        (Action.R_CANCEL, 
+                            msg.timestamp, 
+                            ts_recv, sequence, 
+                            msg.order_reference_number, 
+                            0, # no old quantity for replaced-cancelled message 
+                            255, # no bid/side ask for replaced-cancelled message
+                            msg.stock_locate, 
+                            0) # no price for replaced-cancelled message
+                    )
+        event_add = ring.write(
+                            (Action.R_ADD, 
+                             msg.timestamp, 
+                             ts_recv, sequence, 
+                             msg.new_order_reference_number, 
+                             msg.shares, 
+                             255, # no bid/side ask for replaced-cancelled message
+                             msg.stock_locate, 
+                             msg.price)
+                        )
         return [event_cancel, event_add]
         
 
     @handle_message.register(OrderDeleteMessage)
     def _(msg, sequence, ts_recv):
-        instrument = instrument_directory.symbol_for(msg.stock_locate)
-        event = Event("DELETE", msg.timestamp, ts_recv, sequence, msg.order_reference_number, orders[msg.order_reference_number]["quantity"], 
-                      orders[msg.order_reference_number]["side"], instrument, orders[msg.order_reference_number]["price"])
+        # instrument = instrument_directory.symbol_for(msg.stock_locate)
+        # event = Event("DELETE", msg.timestamp, ts_recv, sequence, msg.order_reference_number, orders[msg.order_reference_number]["quantity"], 
+        #               orders[msg.order_reference_number]["side"], instrument, orders[msg.order_reference_number]["price"])
         
-        del orders[msg.order_reference_number]
+        # del orders[msg.order_reference_number]
+
+        event = ring.write(
+                    (Action.DELETE, 
+                        msg.timestamp, 
+                        ts_recv, sequence, 
+                        msg.order_reference_number, 
+                        0, # no quantity for deleted orders 
+                        255, # no bid/side ask for deleted orders
+                        msg.stock_locate, 
+                        0) # no price for deleted orders
+                )
         return [event]
 
     
@@ -160,8 +212,7 @@ def processor(raw_queue, shm_name, capacity):
         for i, message in enumerate(messages[offset:], start=offset):
             msg_sequence = sequence + i
             message_type = parser.get_message_type(message)
-            for event in handle_message(message_type, msg_sequence, ts_recv):
-                pass
+            handle_message(message_type, msg_sequence, ts_recv)
 
         expected_sequence = sequence + count
 
