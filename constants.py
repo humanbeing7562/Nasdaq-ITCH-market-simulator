@@ -17,3 +17,17 @@ MSG_LEN_FORMAT = ">H"      # big-endian uint16 length prefix per message
 MSG_LEN_SIZE = struct.calcsize(MSG_LEN_FORMAT)  
 
 RETRANSMIT_PORT = 30001
+
+from enum import IntEnum
+
+class Action(IntEnum):
+    ADD = 1
+    CANCEL = 2
+    DELETE = 3
+    EXECUTE = 4
+    R_CANCEL = 5
+    R_ADD = 6
+    
+class Side(IntEnum):
+    BID = 0
+    ASK = 1

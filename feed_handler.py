@@ -11,7 +11,7 @@ import time
 import threading
 from ring_buffer import *
 from multiprocessing import shared_memory
-
+from order_book import consumer
 
 HOST = ""
 PORT = 30000
@@ -19,20 +19,7 @@ PORT = 30000
 MSG_LEN_FORMAT = ">H"
 HEADER_SIZE = 20
 
-from enum import IntEnum
 
-class Action(IntEnum):
-    ADD = 1
-    CANCEL = 2
-    DELETE = 3
-    EXECUTE = 4
-    R_CANCEL = 5
-    R_ADD = 6
-    
-class Side(IntEnum):
-    BID = 0
-    ASK = 1
-    
 
 def receiver(raw_queue):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -45,7 +32,7 @@ def receiver(raw_queue):
         packet = sock.recv(1500)
         raw_queue.put((time.time_ns(), packet))
 
-def processor(raw_queue, shm_name, capacity):
+def processor(raw_queue, shm_name, capacity, instrument_map):
 
     shm = shared_memory.SharedMemory(name=shm_name, create=False)
     ring = Ring(shm, capacity)
@@ -72,19 +59,15 @@ def processor(raw_queue, shm_name, capacity):
         stock_locate = msg.stock_locate
         symbol = msg.decode().stock
         instrument_directory.register(stock_locate, symbol)
+        instrument_map[stock_locate] = symbol
         return []
 
     @handle_message.register(AddOrderMessage)
     @handle_message.register(AddOrderNoMPIAttributionMessage)
     @handle_message.register(AddOrderMPIDAttribution)
     def _(msg, sequence, ts_recv):
-        # instrument = instrument_directory.symbol_for(msg.stock_locate)
-        # orders[msg.order_reference_number] = {
-        #     "instrument": instrument,
-        #     "side": msg.buy_sell_indicator,
-        #     "price": msg.price,
-        #     "quantity": msg.shares,
-        # }
+        orders[msg.order_reference_number] = msg.buy_sell_indicator
+        
         event = ring.write(
             (Action.ADD, 
              msg.timestamp, 
@@ -120,7 +103,7 @@ def processor(raw_queue, shm_name, capacity):
                      255, # no bid/side ask for executed message
                      msg.stock_locate, 
                      -1) # no price for executed message
-                )
+                )                    
         return [event]
 
     @handle_message.register(OrderCancelMessage)
@@ -153,13 +136,16 @@ def processor(raw_queue, shm_name, capacity):
         #     }
         # event_cancel = Event("R-CANCEL", msg.timestamp, ts_recv, sequence, msg.order_reference_number, old_entry["quantity"], old_entry["side"], instrument, old_entry["price"])
         # event_add = Event("R-ADD", msg.timestamp, ts_recv, sequence, msg.new_order_reference_number, msg.shares, old_entry["side"], instrument, msg.price)
+        side = orders[msg.order_reference_number]
+        orders[msg.new_order_reference_number] = side
+        del orders[msg.order_reference_number]
         event_cancel = ring.write(
                         (Action.R_CANCEL, 
                             msg.timestamp, 
                             ts_recv, sequence, 
                             msg.order_reference_number, 
                             0, # no old quantity for replaced-cancelled message 
-                            255, # no bid/side ask for replaced-cancelled message
+                            Side.BID if side == b"B" else Side.ASK, # no bid/side ask for replaced-cancelled message
                             msg.stock_locate, 
                             0) # no price for replaced-cancelled message
                     )
@@ -169,7 +155,7 @@ def processor(raw_queue, shm_name, capacity):
                              ts_recv, sequence, 
                              msg.new_order_reference_number, 
                              msg.shares, 
-                             255, # no bid/side ask for replaced-cancelled message
+                             Side.BID if side == b"B" else Side.ASK, # no bid/side ask for replaced-cancelled message
                              msg.stock_locate, 
                              msg.price)
                         )
@@ -182,8 +168,7 @@ def processor(raw_queue, shm_name, capacity):
         # event = Event("DELETE", msg.timestamp, ts_recv, sequence, msg.order_reference_number, orders[msg.order_reference_number]["quantity"], 
         #               orders[msg.order_reference_number]["side"], instrument, orders[msg.order_reference_number]["price"])
         
-        # del orders[msg.order_reference_number]
-
+        del orders[msg.order_reference_number]
         event = ring.write(
                     (Action.DELETE, 
                         msg.timestamp, 
@@ -260,36 +245,26 @@ def processor(raw_queue, shm_name, capacity):
             parse_and_apply(buf_seq, buf_count, buf_packet, buf_ts_recv, offset=0)
 
 
-def consumer(shm_name, capacity):
-    shm = shared_memory.SharedMemory(name=shm_name, create=False)
-    ring = Ring(shm, capacity)
-    cursor = 0
-    count = 0
-    lapped_count = 0
-    print("Consumer listening now...")
-    while True:
-        result = ring.read(cursor)
-        if result is None:
-            continue
-        cursor += 1
-        count += 1
-        if isinstance(result, tuple) and result[0] == "LAPPED":
-            lapped_count += 1
-        if count % 10000 == 0:
-            print(f"consumed {count} | seq={result['sequence']} price={result['price']} qty={result['quantity']} side={result['side']}")
-            print(lapped_count)
+
     
 def main():
-
-    capacity = 1024
+    manager = multiprocessing.Manager()
+    instrument_map = manager.dict()
+    capacity = 262144  
     shm_size =  8 + (capacity * EVENT.itemsize)
     shm = shared_memory.SharedMemory(create=True, size=shm_size)
 
     raw_queue = multiprocessing.Queue()
 
     receiver_process = multiprocessing.Process(target=receiver, args=(raw_queue,), daemon=True)
-    processor_process = multiprocessing.Process(target=processor, args=(raw_queue, shm.name, capacity), daemon=True)
-    consumer_process = multiprocessing.Process(target=consumer, args=(shm.name, capacity), daemon=True)
+    processor_process = multiprocessing.Process(
+        target=processor, 
+        args=(raw_queue, shm.name, capacity, instrument_map)
+    )
+    consumer_process = multiprocessing.Process(
+        target=consumer, 
+        args=(shm.name, capacity, instrument_map)
+    )
 
     receiver_process.start()
     processor_process.start()
