@@ -94,7 +94,9 @@ class Book:
         return keys[0]
 ```
 
-The book will keep track of bid and ask prices, along with their quantity per each price. We use `SortedDict` to keep track of them as it is currently the most efficient way (O(log n)) to work with constantly changing prices and quantity. As we do want the best bid and ask prices, `SortedDict` allows us to grab either the first/last index for ask/bid prices respectively to get their best prices. Other ideas were explored, however, this is the best one currently possible. (Any feedback on this would be more than welcome)
+The book will keep track of bid and ask prices, along with their quantity per each price. We use `SortedDict` to keep track of them as it is currently the most efficient way (O(log n)) to work with constantly changing prices and quantity. As we do want the best bid and ask prices, `SortedDict` allows us to grab either the first/last index for ask/bid prices respectively to get their best prices. Additionally, we could also get other price levels (e.g., MBP-10, etc.) with the `SortedDict` -- we simply have to return an entire range instead of just the best prices. 
+
+Other ideas were explored, however, this is the best one currently possible. (Any feedback on this would be more than welcome).
 
 To keep track of multiple stock symbols, we store all the `Book`s into another dictionary `books` and update it accordingly depending on the event types we receive. For example, when we receive an `ADD` event, we will create the `Book` for the stock symbol (if it hasn't already been created yet) and add the new price based on the ask/bid side:
 
