@@ -26,7 +26,7 @@ This receiver currently spawns 2 processes while sharing one `raw_queue`:
 
 The processor is also currently capable of doing sequence error handling (i.e., where sequences are skipped due to simulated packet losses). When a message gets parsed by the processor, an `Event` will also be tracked for the future modules. 
 
-## Ring Buffer (Module 2) (IN PROGRESS)
+## Ring Buffer (Module 2)
 
 Purpose of this module will be to move decoded events from the feed handler thread to the strategy thread (maybe process instead?).
 
@@ -64,7 +64,7 @@ class Ring:
 
 In terms of reading, to support a Single-Producer-Multi-Consumer architecture, each module that tries to read must provide their own `cursor` to indicate which specific index that they want. Note that since the data itself is a ring that gets constantly rewritten, there is a possibility that a reader might have been "lapped". The ring itself can check if you are trying to read something that is lapped. Currently, the only precaution done is by increasing the size of the ring -- apart from that, it is currently assumed that a reader should not be too slow (in terms of processing) to not get lapped.
 
-## Book (Module 3) (IN PROGRESS)
+## Book (Module 3)
 
 This is one example of the consumers of the ring buffer implemented above. The goal of this module (for now) is to keep both market-by-order (MBO) and market-by-price-1 (MBP-1) data by reading and reconstructing data from the ring buffer. It is noted that this order book should also keep track for **each** stock symbol, rather than just tracking a certain few.
 
