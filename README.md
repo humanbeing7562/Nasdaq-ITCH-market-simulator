@@ -40,13 +40,13 @@ The book builder gates — if it gets lapped, it misses deltas and the book is s
 
 The producer caches the minimum gating cursor locally and only rescans when the cache suggests the ring might be full, so the common-path `write()` does one subtraction and one comparison with no shared memory reads.
 
-The implementation follows the core mechanisms from the [LMAX Disruptor](https://lmax-exchange.github.io/disruptor/): single-producer multi-consumer with independent cursors in shared memory, gating vs non-gating consumer distinction, and cached minimum scan. See [ring_buffer.py](https://github.com/humanbeing7562/ring_buffer.py) for the full implementation.
+The implementation follows the core mechanisms from the [LMAX Disruptor](https://lmax-exchange.github.io/disruptor/): single-producer multi-consumer with independent cursors in shared memory, gating vs non-gating consumer distinction, and cached minimum scan. See [ring_buffer.py](https://github.com/humanbeing7562/Nasdaq-ITCH-market-simulator/ring_buffer.py) for the full implementation.
 
 ## Book (Module 3)
 
 Consumes ring buffer events as a gating consumer and reconstructs per-instrument order books. Each instrument gets a `Book` holding two `SortedDict` instances (from `sortedcontainers`) mapping price to aggregate quantity — one for bids, one for asks. `SortedDict` gives O(log n) insertion and deletion with O(1) access to best bid (`keys()[-1]`) and best ask (`keys()[0]`), and supports arbitrary depth queries (MBP-10, full depth) by slicing the keys.
 
-A global `orders` dict (`order_id → {instrument, side, price, quantity}`) lives here, not in the feed handler, because ITCH cancel/delete/execute messages don't carry price or side — those fields must be looked up from the original add. Events are dispatched by action type (ADD, CANCEL, DELETE, EXECUTE, R_CANCEL, R_ADD) — see [order_book.py](https://github.com/humanbeing7562/order_book.py) for the full implementation.
+A global `orders` dict (`order_id → {instrument, side, price, quantity}`) lives here, not in the feed handler, because ITCH cancel/delete/execute messages don't carry price or side — those fields must be looked up from the original add. Events are dispatched by action type (ADD, CANCEL, DELETE, EXECUTE, R_CANCEL, R_ADD) — see [order_book.py](https://github.com/humanbeing7562/Nasdaq-ITCH-market-simulator/order_book.py) for the full implementation.
 
 This structure processes incoming events at 100x real speed without getting lapped by the feed handler.
 
