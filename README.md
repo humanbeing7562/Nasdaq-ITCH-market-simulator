@@ -1,6 +1,6 @@
 # Nasdaq TotalView-ITCH5.0 Market Data Simulator
 
-Market data feed handler simulator parsing real Nasdaq ITCH 5.0 data over reconstructed MoldUDP64 transport, with an LMAX Disruptor-style (Thompson, 2011) shared-memory ring buffer feeding gating and non-gating consumers into per-instrument order book construction. Built in Python as a learning vehicle for production feed handler architecture — not a performance claim.
+Market data feed handler simulator parsing real Nasdaq ITCH 5.0 data over reconstructed MoldUDP64 transport, with an LMAX Disruptor-style shared-memory ring buffer feeding gating and non-gating consumers into per-instrument order book construction. Built in Python as a learning vehicle for production feed handler architecture — not a performance claim.
 
 The modules created will be as follows in order to create a full market data feed handler:
 
@@ -40,7 +40,7 @@ The book builder gates — if it gets lapped, it misses deltas and the book is s
 
 The producer caches the minimum gating cursor locally and only rescans when the cache suggests the ring might be full, so the common-path `write()` does one subtraction and one comparison with no shared memory reads.
 
-The implementation follows the core mechanisms from the [LMAX Disruptor](https://lmax-exchange.github.io/disruptor/) (Thompson, 2011): single-producer multi-consumer with independent cursors in shared memory, gating vs non-gating consumer distinction, and cached minimum scan. See [ring_buffer.py](https://github.com/humanbeing7562/ring_buffer.py) for the full implementation.
+The implementation follows the core mechanisms from the [LMAX Disruptor](https://lmax-exchange.github.io/disruptor/): single-producer multi-consumer with independent cursors in shared memory, gating vs non-gating consumer distinction, and cached minimum scan. See [ring_buffer.py](https://github.com/humanbeing7562/ring_buffer.py) for the full implementation.
 
 ## Book (Module 3)
 
