@@ -79,6 +79,7 @@ def broadcast(itch_file_path=itch_file_path, speed=100):
 
         sock.sendto(packet, ("229.0.0.1", 30000))
 
+    print("SESSION ENDED!")
 
 if __name__ == "__main__":
     broadcast()

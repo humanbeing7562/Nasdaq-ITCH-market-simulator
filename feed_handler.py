@@ -12,6 +12,7 @@ import threading
 from ring_buffer import *
 from multiprocessing import shared_memory
 from order_book import consumer
+from logger import logger
 
 HOST = ""
 PORT = 30000
@@ -68,7 +69,7 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
     def _(msg, sequence, ts_recv):
         orders[msg.order_reference_number] = msg.buy_sell_indicator
         
-        event = ring.write(
+        while not (ring.write(
             (Action.ADD, 
              msg.timestamp, 
              ts_recv, sequence, 
@@ -77,24 +78,14 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
              Side.BID if msg.buy_sell_indicator == b"B" else Side.ASK, 
              msg.stock_locate, 
              msg.price)
-        )
-        return [event]
+        )):
+            pass
         
 
     @handle_message.register(OrderExecutedMessage)
     def _(msg, sequence, ts_recv):
-        # current_quantity = orders[msg.order_reference_number]["quantity"]
-        # order_quantity = msg.executed_shares
-        # side = orders[msg.order_reference_number]["side"]
-        # price = orders[msg.order_reference_number]["price"]
-        # if order_quantity >= current_quantity:
-        #     del orders[msg.order_reference_number]
-        # else:
-        #     orders[msg.order_reference_number]["quantity"] -= msg.executed_shares
-        # instrument = instrument_directory.symbol_for(msg.stock_locate)
-        # event = Event("EXECUTE", msg.timestamp, ts_recv, sequence, msg.order_reference_number, order_quantity, side, instrument, price)
 
-        event = ring.write(
+        while not( ring.write(
                     (Action.EXECUTE, 
                      msg.timestamp, 
                      ts_recv, sequence, 
@@ -103,15 +94,12 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
                      255, # no bid/side ask for executed message
                      msg.stock_locate, 
                      -1) # no price for executed message
-                )                    
-        return [event]
+                )):
+            pass             
 
     @handle_message.register(OrderCancelMessage)
     def _(msg, sequence, ts_recv):
-        # instrument = instrument_directory.symbol_for(msg.stock_locate)
-        # orders[msg.order_reference_number]["quantity"] -= msg.cancelled_shares
-        # event = Event("CANCEL", msg.timestamp, ts_recv, sequence, msg.order_reference_number, msg.cancelled_shares, orders[msg.order_reference_number]["side"], instrument, orders[msg.order_reference_number]["price"])
-        event = ring.write(
+        while not ( ring.write(
                     (Action.CANCEL, 
                     msg.timestamp, 
                     ts_recv, sequence, 
@@ -120,26 +108,17 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
                     255, # no bid/side ask for cancelled message
                     msg.stock_locate, 
                     -1) # no price for cancelled message
-                )
+                )):
+            pass
     
-        return [event]
  
     @handle_message.register(OrderReplaceMessage)
     def _(msg, sequence, ts_recv):
-        # old_entry = orders.pop(msg.order_reference_number)
-        # instrument = instrument_directory.symbol_for(msg.stock_locate)
-        # orders[msg.new_order_reference_number] = {
-        #         "instrument": old_entry["instrument"],
-        #         "side": old_entry["side"],
-        #         "price": msg.price,
-        #         "quantity": msg.shares,
-        #     }
-        # event_cancel = Event("R-CANCEL", msg.timestamp, ts_recv, sequence, msg.order_reference_number, old_entry["quantity"], old_entry["side"], instrument, old_entry["price"])
-        # event_add = Event("R-ADD", msg.timestamp, ts_recv, sequence, msg.new_order_reference_number, msg.shares, old_entry["side"], instrument, msg.price)
+
         side = orders[msg.order_reference_number]
         orders[msg.new_order_reference_number] = side
         del orders[msg.order_reference_number]
-        event_cancel = ring.write(
+        while not (ring.write(
                         (Action.R_CANCEL, 
                             msg.timestamp, 
                             ts_recv, sequence, 
@@ -148,8 +127,10 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
                             Side.BID if side == b"B" else Side.ASK, # no bid/side ask for replaced-cancelled message
                             msg.stock_locate, 
                             0) # no price for replaced-cancelled message
-                    )
-        event_add = ring.write(
+                    )):
+            pass
+       
+        while not (ring.write(
                             (Action.R_ADD, 
                              msg.timestamp, 
                              ts_recv, sequence, 
@@ -158,18 +139,15 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
                              Side.BID if side == b"B" else Side.ASK, # no bid/side ask for replaced-cancelled message
                              msg.stock_locate, 
                              msg.price)
-                        )
-        return [event_cancel, event_add]
+                        )):
+            pass
         
 
     @handle_message.register(OrderDeleteMessage)
     def _(msg, sequence, ts_recv):
-        # instrument = instrument_directory.symbol_for(msg.stock_locate)
-        # event = Event("DELETE", msg.timestamp, ts_recv, sequence, msg.order_reference_number, orders[msg.order_reference_number]["quantity"], 
-        #               orders[msg.order_reference_number]["side"], instrument, orders[msg.order_reference_number]["price"])
         
         del orders[msg.order_reference_number]
-        event = ring.write(
+        while not (ring.write(
                     (Action.DELETE, 
                         msg.timestamp, 
                         ts_recv, sequence, 
@@ -178,8 +156,9 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
                         255, # no bid/side ask for deleted orders
                         msg.stock_locate, 
                         0) # no price for deleted orders
-                )
-        return [event]
+                )):
+            pass
+       
 
     
     expected_sequence = 1
@@ -212,7 +191,6 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
         return probe - expected_sequence
     
     requested = set()
-    MAX_PENDING = 1024
     pending = {}
     retransmit_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     retransmit_sock.bind(('', 0))
@@ -251,9 +229,9 @@ def main():
     manager = multiprocessing.Manager()
     instrument_map = manager.dict()
     capacity = 262144  
-    shm_size =  8 + (capacity * EVENT.itemsize)
+    shm_size =  8 + 8 + (MAX_CONSUMERS * 8) + MAX_CONSUMERS + (capacity * EVENT.itemsize)
     shm = shared_memory.SharedMemory(create=True, size=shm_size)
-
+    shm.buf[:] = b'\x00' * shm_size
     raw_queue = multiprocessing.Queue()
 
     receiver_process = multiprocessing.Process(target=receiver, args=(raw_queue,), daemon=True)
@@ -265,10 +243,15 @@ def main():
         target=consumer, 
         args=(shm.name, capacity, instrument_map)
     )
+    logger_process = multiprocessing.Process(
+        target=logger,
+        args=(shm.name, capacity, instrument_map)
+    )
 
     receiver_process.start()
     processor_process.start()
     consumer_process.start()
+    logger_process.start()
     receiver_process.join()
 
        

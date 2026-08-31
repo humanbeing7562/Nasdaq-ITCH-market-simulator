@@ -11,6 +11,7 @@ HEADER_FORMAT = ">10sQH"
 BODY_FORMAT = ">H"
 HEADER_FORMAT = ">10sQH"   # big-endian: 10-byte session, uint64 seq, uint16 count
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)   # 20 bytes
+MAX_CONSUMERS = 4 # maximum gating consumers
 assert HEADER_SIZE == 20
  
 MSG_LEN_FORMAT = ">H"      # big-endian uint16 length prefix per message

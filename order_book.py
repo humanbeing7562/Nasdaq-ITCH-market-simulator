@@ -3,6 +3,7 @@ from multiprocessing import shared_memory
 from ring_buffer import Ring
 from sortedcontainers import SortedDict
 from constants import * 
+import time
 
 class Book:
 
@@ -61,21 +62,15 @@ def decrement_level(side_prices, price, qty):
 def consumer(shm_name, capacity, instrument_map):
     shm = shared_memory.SharedMemory(name=shm_name, create=False)
     ring = Ring(shm, capacity)
-    cursor = 0
+    consumer_id = ring.register(gating=True, name="Order book")
     count = 0
-    lapped_count = 0
-    print("Consumer listening now...")
+    print("Order book listening now...")
     while True:
-        result = ring.read(cursor)
+        result = ring.read(consumer_id)
         if result is None:
             continue
-        cursor += 1
+
         count += 1
-        if isinstance(result, tuple) and result[0] == "LAPPED":
-            lapped_count += 1
-            print(f"LAPPED: cursor={cursor}, jumped to={result[1]}")
-            cursor = result[1]
-            continue
 
         if result['action'] == Action.ADD:
             order_id = result['order_id']
