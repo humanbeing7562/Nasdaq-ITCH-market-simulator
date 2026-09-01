@@ -62,3 +62,6 @@ To further test the Single-Producer-Multi-Consumer architecture and ensure that 
 - Order Gateway (Module 5) — exchange session management, order state machine
 - Risk Gate (Module 6) — pre-trade checks, kill switch
 
+## Notes
+
+For more information, you may refer to [build_log.md](docs/build-log.md) for a dated record of design decisions, bugs encountered (and solutions), as well as implementation details.
