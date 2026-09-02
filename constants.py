@@ -1,5 +1,5 @@
 import struct 
-
+import numpy as np
 HOST = ""
 IP = "192.168.0.7"
 PORT = 30000
@@ -32,3 +32,18 @@ class Action(IntEnum):
 class Side(IntEnum):
     BID = 0
     ASK = 1
+
+
+MAX_INSTRUMENTS = 65536       
+MBP_DEPTH = 10               
+SNAPSHOT_INTERVAL = 0.200     
+SNAPSHOT_SHM_NAME = "mbp_snapshots"
+ 
+SNAPSHOT_DTYPE = np.dtype([
+    ('bid_price', np.int64, (MBP_DEPTH,)),
+    ('bid_qty',   np.int32, (MBP_DEPTH,)),
+    ('ask_price', np.int64, (MBP_DEPTH,)),
+    ('ask_qty',   np.int32, (MBP_DEPTH,)),
+    ('timestamp', np.int64),
+    ('seqlock',   np.uint64),
+])

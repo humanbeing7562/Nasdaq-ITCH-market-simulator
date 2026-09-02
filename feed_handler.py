@@ -234,6 +234,13 @@ def main():
     shm.buf[:] = b'\x00' * shm_size
     raw_queue = multiprocessing.Queue()
 
+
+    snapshot_size = MAX_INSTRUMENTS * SNAPSHOT_DTYPE.itemsize
+    snapshot_shm = shared_memory.SharedMemory(
+        name=SNAPSHOT_SHM_NAME, create=True, size=snapshot_size
+    )
+    snapshot_shm.buf[:] = b'\x00' * snapshot_size
+    
     receiver_process = multiprocessing.Process(target=receiver, args=(raw_queue,), daemon=True)
     processor_process = multiprocessing.Process(
         target=processor, 

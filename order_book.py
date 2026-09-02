@@ -4,6 +4,61 @@ from ring_buffer import Ring
 from sortedcontainers import SortedDict
 from constants import * 
 import time
+import numpy as np
+
+def attach_snapshot_shm():
+    shm = shared_memory.SharedMemory(name=SNAPSHOT_SHM_NAME, create=False)
+    snapshots = np.ndarray(MAX_INSTRUMENTS, dtype=SNAPSHOT_DTYPE, buffer=shm.buf)
+    return shm, snapshots
+
+def publish_snapshots(books, snapshots):
+    now = time.time_ns()
+    for instrument_id, book in books.items():
+        slot = snapshots[instrument_id]
+ 
+        slot['seqlock'] += 1
+ 
+        slot['bid_price'][:] = 0
+        slot['bid_qty'][:] = 0
+        slot['ask_price'][:] = 0
+        slot['ask_qty'][:] = 0
+ 
+        bids = list(book.bid_prices.items())[-MBP_DEPTH:]
+        for i, (price, qty) in enumerate(reversed(bids)):
+            slot['bid_price'][i] = price
+            slot['bid_qty'][i] = qty
+ 
+        asks = list(book.ask_prices.items())[:MBP_DEPTH]
+        for i, (price, qty) in enumerate(asks):
+            slot['ask_price'][i] = price
+            slot['ask_qty'][i] = qty
+ 
+        slot['timestamp'] = now
+ 
+        slot['seqlock'] += 1
+
+def read_snapshot(snapshots, instrument_id):
+    # don't think we need this function here 
+    # but just leaving it here as a sample
+    slot = snapshots[instrument_id]
+ 
+    seq1 = int(slot['seqlock'])
+    if seq1 % 2 == 1:
+        return None 
+ 
+    data = {
+        'bid_price': slot['bid_price'].copy(),
+        'bid_qty': slot['bid_qty'].copy(),
+        'ask_price': slot['ask_price'].copy(),
+        'ask_qty': slot['ask_qty'].copy(),
+        'timestamp': int(slot['timestamp']),
+    }
+ 
+    seq2 = int(slot['seqlock'])
+    if seq2 != seq1:
+        return None
+ 
+    return data
 
 class Book:
 
@@ -26,7 +81,6 @@ class Book:
         if len(keys) == 0:
             return 0
         return keys[0]
-
 
 orders = {}    
 
@@ -63,14 +117,18 @@ def consumer(shm_name, capacity, instrument_map):
     shm = shared_memory.SharedMemory(name=shm_name, create=False)
     ring = Ring(shm, capacity)
     consumer_id = ring.register(gating=True, name="Order book")
-    count = 0
+    # count = 0
+
+    snapshot_shm, snapshots = attach_snapshot_shm()
+    last_publish = time.monotonic()
+
     print("Order book listening now...")
     while True:
         result = ring.read(consumer_id)
         if result is None:
             continue
 
-        count += 1
+        # count += 1
 
         if result['action'] == Action.ADD:
             order_id = result['order_id']
@@ -144,17 +202,23 @@ def consumer(shm_name, capacity, instrument_map):
             side_prices = get_side_prices(book, side)
             side_prices[price] = side_prices.get(price, 0) + qty
 
+
+        now = time.monotonic()
+        if now - last_publish >= SNAPSHOT_INTERVAL:
+            publish_snapshots(books, snapshots)
+            last_publish = now
+            print(read_snapshot(snapshots, 5628))
         
 
-        WATCH_INSTRUMENT = 5628 # just to limit printing...
+        # WATCH_INSTRUMENT = 5628 # just to limit printing...
 
-        if count % 1000000 == 0:
-            if WATCH_INSTRUMENT is None:
-                for inst_id, book in books.items():
-                    if len(book.bid_prices) > 10 and len(book.ask_prices) > 10:
-                        WATCH_INSTRUMENT = inst_id
-                        break
+        # if count % 1000000 == 0:
+        #     if WATCH_INSTRUMENT is None:
+        #         for inst_id, book in books.items():
+        #             if len(book.bid_prices) > 10 and len(book.ask_prices) > 10:
+        #                 WATCH_INSTRUMENT = inst_id
+        #                 break
             
-            if WATCH_INSTRUMENT in books:
-                book = books[WATCH_INSTRUMENT]
-                print(f"{instrument_map.get(WATCH_INSTRUMENT)}: best_bid=${book.best_bid/10000:.2f}, best_ask=${book.best_ask/10000:.2f}")
+        #     if WATCH_INSTRUMENT in books:
+        #         book = books[WATCH_INSTRUMENT]
+        #         print(f"{instrument_map.get(WATCH_INSTRUMENT)}: best_bid=${book.best_bid/10000:.2f}, best_ask=${book.best_ask/10000:.2f}")
