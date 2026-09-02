@@ -181,7 +181,9 @@ Running day-by-day log of what's actually been built, not a study plan. New entr
 - Missing `await` on `asyncio.gather()` in the `run()` function caused the server to start, fire off tasks, immediately exit the `async with` block, and cancel everything. Surfaced as `CancelledError` on `asyncio.sleep()` in the snapshot task — the real error was masked because the gather's future exception was never retrieved.
 
 **Architecture:**
-- Seven-process system: receiver → processor → ring → {book builder (gating), logger (non-gating), trade relay (gating)} + WebSocket server (reads snapshot shared memory + trade queue). Main process + Manager.
+- Seven-process system: receiver → processor → ring → {book builder (gating), 
+                                             → logger (non-gating), 
+                                             → trade relay (gating)} + WebSocket server (reads snapshot shared memory + trade queue). 
 - Trade relay → `multiprocessing.Queue` → WebSocket is the correct split because the relay's job is a tight ring-reading loop that shouldn't be blocked by WebSocket I/O. The queue is manageable because trade volume is a small fraction of total events (most are adds/cancels/deletes).
 - WebSocket server is not a ring consumer. It reads two data sources: trade queue (for live trades) and snapshot shared memory (for book state). Decoupled from the ring entirely.
 
