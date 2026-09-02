@@ -14,7 +14,7 @@ from multiprocessing import shared_memory
 from order_book import consumer
 from logger import logger
 from trade_relay import trade_relay
-from ohlcv_websocket import ws_server
+from websocket_visualizer_data import ws_server
 
 HOST = ""
 PORT = 30000
