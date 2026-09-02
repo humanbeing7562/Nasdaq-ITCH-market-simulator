@@ -13,6 +13,8 @@ from ring_buffer import *
 from multiprocessing import shared_memory
 from order_book import consumer
 from logger import logger
+from trade_relay import trade_relay
+from ohlcv_websocket import ws_server
 
 HOST = ""
 PORT = 30000
@@ -67,7 +69,7 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
     @handle_message.register(AddOrderNoMPIAttributionMessage)
     @handle_message.register(AddOrderMPIDAttribution)
     def _(msg, sequence, ts_recv):
-        orders[msg.order_reference_number] = msg.buy_sell_indicator
+        orders[msg.order_reference_number] = (msg.buy_sell_indicator, msg.price)
         
         while not (ring.write(
             (Action.ADD, 
@@ -82,7 +84,7 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
             pass
         
 
-    @handle_message.register(OrderExecutedMessage)
+    @handle_message.register(OrderExecutedWithPriceMessage)
     def _(msg, sequence, ts_recv):
 
         while not( ring.write(
@@ -93,9 +95,24 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
                      msg.executed_shares, 
                      255, # no bid/side ask for executed message
                      msg.stock_locate, 
-                     -1) # no price for executed message
+                     msg.execution_price) # no price for executed message
                 )):
-            pass             
+            pass
+
+    @handle_message.register(OrderExecutedMessage)
+    def _(msg, sequence, ts_recv):
+        side, price = orders[msg.order_reference_number]
+        while not( ring.write(
+                    (Action.EXECUTE, 
+                        msg.timestamp, 
+                        ts_recv, sequence, 
+                        msg.order_reference_number, 
+                        msg.executed_shares, 
+                        Side.BID if side == b"B" else Side.ASK, # no bid/side ask for executed message
+                        msg.stock_locate, 
+                        price) # no price for executed message
+                )):
+            pass              
 
     @handle_message.register(OrderCancelMessage)
     def _(msg, sequence, ts_recv):
@@ -115,8 +132,8 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
     @handle_message.register(OrderReplaceMessage)
     def _(msg, sequence, ts_recv):
 
-        side = orders[msg.order_reference_number]
-        orders[msg.new_order_reference_number] = side
+        side, _ = orders[msg.order_reference_number]
+        orders[msg.new_order_reference_number] = (side, _)
         del orders[msg.order_reference_number]
         while not (ring.write(
                         (Action.R_CANCEL, 
@@ -254,11 +271,21 @@ def main():
         target=logger,
         args=(shm.name, capacity, instrument_map)
     )
-
+    trade_queue = multiprocessing.Queue()
+    trade_relay_process = multiprocessing.Process(
+        target=trade_relay,
+        args=(shm.name, capacity, trade_queue)
+    )
+    ws_process = multiprocessing.Process(
+        target=ws_server,
+        args=(trade_queue, instrument_map)
+    )
     receiver_process.start()
     processor_process.start()
     consumer_process.start()
     logger_process.start()
+    trade_relay_process.start()
+    ws_process.start()
     receiver_process.join()
 
        

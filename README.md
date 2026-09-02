@@ -56,7 +56,17 @@ The book builder now publishes MBP-10 snapshots to shared memory every 200ms. A 
 
 Writes are protected by a seqlock — the counter increments to odd before writing and back to even after, so any reader that observes an odd value or a changed value between its two reads knows it caught a torn read and retries. This is the publication boundary between the hot path and future cold-path consumers (WebSocket server, dashboard); the book builder doesn't know or care who reads the snapshots.
 
-## Logger (Module 3b)
+## OHLCV Aggregator (Module 3b)
+
+### Part 1 -- Ring consumer
+Consumes the ring buffer as a gating consumer, filtering for `Action.EXECUTE` events — the normalized form of both executed order types after the feed handler has resolved prices and written them to the ring. These trade events are forwarded to a `trade_queue` consumed by a [websocket](#part-2----websocket-ohlcv-aggregator).
+
+### Part 2 -- WebSocket OHLCV Aggregator
+Consumes the `trade_queue` and keeps a list of 1-second OHLCV bars in memory. Coarser timeframes (1-minute, 5-minute, 15-minute) are rolled up from the 1-second bars on demand. On client connection, the full bar history for the session is sent as backfill before switching to live streaming. Since we are only working with single-day data, bars are not persisted to disk — this will be revisited once we have multi-session data or a live exchange connection.
+
+Note: the relay and websocket are split into separate processes not because the relay is on the hot path (it isn't — OHLCV is a monitoring concern, not a trading one), but because the relay's job is a tight ring-reading loop that shouldn't be blocked by websocket I/O. Mixing blocking `queue.get()` and asyncio network sends in one process would mean one stalls the other.
+
+## Logger (Module 3c)
 
 To further test the Single-Producer-Multi-Consumer architecture and ensure that it is working correctly, a simple logging module has been made. Note that it won't log every single event as it receives but instead do it in batches because I/O per event is a bottleneck at this message rate. The logger writes to a file `events.log` which has been listed under `.gitignore` due to the file size.
 

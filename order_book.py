@@ -207,7 +207,7 @@ def consumer(shm_name, capacity, instrument_map):
         if now - last_publish >= SNAPSHOT_INTERVAL:
             publish_snapshots(books, snapshots)
             last_publish = now
-            print(read_snapshot(snapshots, 5628))
+            # print(read_snapshot(snapshots, 5628))
         
 
         # WATCH_INSTRUMENT = 5628 # just to limit printing...

@@ -12,6 +12,10 @@ EVENT = np.dtype([
     ("price", np.int64)
 ])
 
+cursor_start = 16
+cursor_end = cursor_start + MAX_CONSUMERS * 8
+flag_end = cursor_end + MAX_CONSUMERS
+
 class Ring:
     def __init__(self, shm, capacity):
         if not (capacity > 0 and (capacity & (capacity - 1)) == 0):
@@ -19,9 +23,9 @@ class Ring:
         self.capacity = capacity
         self.write_seq = np.ndarray(1, dtype=np.uint64, buffer=shm.buf[0:8]) # need ndarray here because uint64 alone wont be mutable.
         self.consumer_count = np.ndarray(1, dtype=np.uint64, buffer=shm.buf[8:16]) # need ndarray here because uint64 alone wont be mutable.
-        self.cursors = np.ndarray(MAX_CONSUMERS, dtype=np.uint64, buffer=shm.buf[16:48])
-        self.gating_flags = np.ndarray(MAX_CONSUMERS, dtype=np.uint8, buffer=shm.buf[48:52])
-        self.ring = np.ndarray(capacity, dtype=EVENT, buffer=shm.buf[52:])
+        self.cursors = np.ndarray(MAX_CONSUMERS, dtype=np.uint64, buffer=shm.buf[cursor_start:cursor_end])
+        self.gating_flags = np.ndarray(MAX_CONSUMERS, dtype=np.uint8, buffer=shm.buf[cursor_end:flag_end])
+        self.ring = np.ndarray(capacity, dtype=EVENT, buffer=shm.buf[flag_end:])
         self.mask = capacity - 1
         self.shm = shm
         self._cached_min_gated = 0
