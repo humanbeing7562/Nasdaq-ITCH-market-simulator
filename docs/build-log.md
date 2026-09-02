@@ -156,3 +156,38 @@ Running day-by-day log of what's actually been built, not a study plan. New entr
 - End-of-session detection — broadcaster finishes but all processes hang forever. MoldUDP64's `0xFFFF` message count should propagate a shutdown signal.
 
 **Status:** Ring buffer now implements LMAX Disruptor-style gating. Book builder is a gating consumer (can never be lapped). Logger is a non-gating consumer (can be lapped, logs gaps). Producer spins on full ring rather than overwriting. Five-process architecture: receiver → processor → ring → {book builder (gating), logger (non-gating)}, plus main and Manager.
+
+## 2026-09-02 — Trade relay, WebSocket server, feed handler fixes
+
+**Context:** Preparing the pipeline for a frontend visualization layer. Needed to get trade events and book snapshots out to a browser.
+
+**Feed handler fixes:**
+- Discovered `OrderExecutedWithPriceMessage` (ITCH type 'C') was never registered — trades where hidden/reserve orders get price improvement were silently dropped. Registered the handler. The book mutation is identical to type 'E' (look up order by ID, decrement quantity at the resting price level). The execution price field only matters downstream for OHLCV/trade logs, not for the book.
+- Expanded `orders` dict in the feed handler from `order_id → buy_sell_indicator` to `order_id → (buy_sell_indicator, price)`. Same lifecycle (populated on Add, updated on Replace, deleted on Delete/full execution). This lets the feed handler stamp resolved trade prices onto `Action.EXECUTE` ring events so downstream consumers don't need their own order lookups. Previously type 'E' ring events carried `-1` for price.
+- Side is now also stamped onto execution ring events instead of `255` (UNKNOWN), since the feed handler has the info from the orders dict anyway.
+- Noted but deferred: the feed handler doesn't track remaining quantity, so it never cleans up `orders` on partial execution. Slow memory leak over a session — tolerable for the sample file, needs a fix for longer runs.
+
+**Key decision:** OHLCV bar aggregation belongs on the frontend, not in a ring consumer process. OHLCV is a monitoring/visualization concern, not a trading one. The frontend receives raw trade events and builds bars at whatever timeframe the user selects — timeframe switching is instant with no backend changes.
+
+**Built:**
+- `trade_relay.py` — gating ring consumer that filters for `Action.EXECUTE` events and forwards `(instrument_id, price, quantity, ts_event)` tuples to a `multiprocessing.Queue`. Gating because missing a trade means wrong bars (completeness), not because it's latency-sensitive. The work per event is trivial (one comparison, occasional `queue.put()`), so it should never be the bottleneck gating consumer.
+- `ws_server.py` — asyncio WebSocket server using the `websockets` library. Two concurrent tasks via `asyncio.gather`:
+  - `broadcast_trades` — reads from `trade_queue` using `loop.run_in_executor()` to bridge blocking `queue.get()` with the async event loop. Broadcasts each trade as JSON to all connected clients.
+  - `broadcast_snapshots` — every 200ms, iterates `instrument_map`, reads each instrument's MBP-10 snapshot from shared memory using the seqlock pattern, bundles all into one JSON message, and broadcasts. Skips instruments with timestamp 0 (never written) and torn reads.
+- `MAX_CONSUMERS` bumped from 4 to 8 to accommodate the new trade relay consumer. Fixed a bug where cursor slice bounds in `Ring.__init__` were hardcoded for `MAX_CONSUMERS=4` — replaced magic numbers with computed offsets from `MAX_CONSUMERS`.
+
+**Bugs encountered:**
+- Naming the WebSocket server file `websocket.py` shadowed the `websockets` library import. Renamed.
+- Missing `await` on `asyncio.gather()` in the `run()` function caused the server to start, fire off tasks, immediately exit the `async with` block, and cancel everything. Surfaced as `CancelledError` on `asyncio.sleep()` in the snapshot task — the real error was masked because the gather's future exception was never retrieved.
+
+**Architecture:**
+- Seven-process system: receiver → processor → ring → {book builder (gating), logger (non-gating), trade relay (gating)} + WebSocket server (reads snapshot shared memory + trade queue). Main process + Manager.
+- Trade relay → `multiprocessing.Queue` → WebSocket is the correct split because the relay's job is a tight ring-reading loop that shouldn't be blocked by WebSocket I/O. The queue is manageable because trade volume is a small fraction of total events (most are adds/cancels/deletes).
+- WebSocket server is not a ring consumer. It reads two data sources: trade queue (for live trades) and snapshot shared memory (for book state). Decoupled from the ring entirely.
+
+**On the horizon:**
+- Frontend: React + Vite + TradingView Lightweight Charts for candlesticks, custom price ladder for MBP-10 depth. Scaffolding deferred to weekend.
+- WebSocket backfill: server should aggregate 1-second bars in memory so clients connecting mid-session get bar history. Deferred until frontend exists.
+- Feed handler `orders` cleanup on partial execution.
+
+**Status:** Full pipeline live from UDP multicast through to browser console. Trade events and MBP-10 book snapshots streaming over WebSocket. Frontend visualization is the next milestone.
