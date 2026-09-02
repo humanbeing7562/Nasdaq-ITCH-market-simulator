@@ -42,7 +42,7 @@ The producer caches the minimum gating cursor locally and only rescans when the 
 
 The implementation follows the core mechanisms from the [LMAX Disruptor](https://lmax-exchange.github.io/disruptor/): single-producer multi-consumer with independent cursors in shared memory, gating vs non-gating consumer distinction, and cached minimum scan. See [ring_buffer.py](ring_buffer.py) for the full implementation.
 
-## Book (Module 3)
+## Book (Module 3a)
 
 Consumes ring buffer events as a gating consumer and reconstructs per-instrument order books. Each instrument gets a `Book` holding two `SortedDict` instances (from `sortedcontainers`) mapping price to aggregate quantity — one for bids, one for asks. `SortedDict` gives O(log n) insertion and deletion with O(1) access to best bid (`keys()[-1]`) and best ask (`keys()[0]`), and supports arbitrary depth queries (MBP-10, full depth) by slicing the keys.
 
@@ -51,6 +51,10 @@ A global `orders` dict (`order_id → {instrument, side, price, quantity}`) live
 This structure processes incoming events at 100x real speed without getting lapped by the feed handler.
 
 Note that since we have not built an order snapshotting capability on the broadcaster side, the order book would always need to start listening from the start of the session (i.e., run the feed_handler (which orchestrates the other processes required) before running the broadcaster). 
+
+The book builder now publishes MBP-10 snapshots to shared memory every 200ms. A flat numpy array of 65,536 snapshot slots (one per ITCH stock_locate) is allocated by the main process and mapped into the book builder via multiprocessing.shared_memory. Every 200ms, publish_snapshots() iterates all active books, extracts the top 10 bid and ask levels from each SortedDict, and writes them into the corresponding slot. The 200ms interval reflects that the intended downstream consumers are browser-based displays — human eyes cannot track individual price level changes faster than this, so writing more frequently would be wasted work. 
+
+Writes are protected by a seqlock — the counter increments to odd before writing and back to even after, so any reader that observes an odd value or a changed value between its two reads knows it caught a torn read and retries. This is the publication boundary between the hot path and future cold-path consumers (WebSocket server, dashboard); the book builder doesn't know or care who reads the snapshots.
 
 ## Logger (Module 3b)
 
