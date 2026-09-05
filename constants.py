@@ -47,3 +47,12 @@ SNAPSHOT_DTYPE = np.dtype([
     ('timestamp', np.int64),
     ('seqlock',   np.uint64),
 ])
+
+TRADE_DTYPE = np.dtype([
+    ('instrument_id', np.uint32),
+    ('price', np.int64),
+    ('quantity', np.int32),
+    ('ts_event', np.int64),
+])
+TRADE_BUFFER_SIZE = 65536  # power of two
+TRADE_SHM_NAME = 'trade_buffer'
