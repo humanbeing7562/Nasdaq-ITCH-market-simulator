@@ -17,10 +17,10 @@ def format_event(event, instrument_map):
         f"{event['quantity']}\n"
     )
 
-def logger(shm_name, capacity, instrument_map):
+def logger(shm_name, capacity, instrument_map, consumer_id):
     shm = shared_memory.SharedMemory(name=shm_name, create=False)   
     ring = Ring(shm, capacity)
-    consumer_id = ring.register(gating=False, name="Logger")
+    # consumer_id = ring.register(gating=False, name="Logger")
     print("Logger book listening now...")
     buffer = []
     FLUSH_INTERVAL = 10000

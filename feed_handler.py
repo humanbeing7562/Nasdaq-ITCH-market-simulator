@@ -14,15 +14,13 @@ from multiprocessing import shared_memory
 from order_book import consumer
 from logger import logger
 from trade_relay import trade_relay
-from websocket_visualizer_data import ws_server
+from ws_server import ws_server
 
 HOST = ""
 PORT = 30000
 
 MSG_LEN_FORMAT = ">H"
 HEADER_SIZE = 20
-
-
 
 def receiver(raw_queue):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -48,154 +46,116 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
     
     latest_sequence = 0
 
-    parser = MessageParser(b"AFECXDUPQR")
-
-    instrument_directory = InstrumentDirectory()
     orders = {}
+    instrument_directory = InstrumentDirectory()
 
-    @singledispatch
-    def handle_message(msg, sequence, ts_recv):
-        return []
+    # message type bytes
+    TYPE_R = ord('R')  # stock directory
+    TYPE_A = ord('A')  # add order
+    TYPE_F = ord('F')  # add order MPID
+    TYPE_E = ord('E')  # order executed
+    TYPE_C = ord('C')  # order executed with price
+    TYPE_X = ord('X')  # order cancel
+    TYPE_D = ord('D')  # order delete
+    TYPE_U = ord('U')  # order replace
 
-    @handle_message.register(StockDirectoryMessage)
-    def _(msg, sequence, ts_recv):
-        stock_locate = msg.stock_locate
-        symbol = msg.decode().stock
-        instrument_directory.register(stock_locate, symbol)
-        instrument_map[stock_locate] = symbol
-        return []
+    def handle_message(msg, msg_seq, ts_recv):
+        msg_type = msg[0]
+        stock_locate = int.from_bytes(msg[1:3], 'big')
+        timestamp = int.from_bytes(msg[5:11], 'big')
 
-    @handle_message.register(AddOrderMessage)
-    @handle_message.register(AddOrderNoMPIAttributionMessage)
-    @handle_message.register(AddOrderMPIDAttribution)
-    def _(msg, sequence, ts_recv):
-        orders[msg.order_reference_number] = (msg.buy_sell_indicator, msg.price)
-        
-        while not (ring.write(
-            (Action.ADD, 
-             msg.timestamp, 
-             ts_recv, sequence, 
-             msg.order_reference_number, 
-             msg.shares, 
-             Side.BID if msg.buy_sell_indicator == b"B" else Side.ASK, 
-             msg.stock_locate, 
-             msg.price)
-        )):
-            pass
-        
+        if msg_type == TYPE_R:
+            symbol = msg[11:19].decode('ascii').strip()
+            instrument_directory.register(stock_locate, symbol)
+            instrument_map[stock_locate] = symbol
 
-    @handle_message.register(OrderExecutedWithPriceMessage)
-    def _(msg, sequence, ts_recv):
+        elif msg_type == TYPE_A or msg_type == TYPE_F:
+            order_ref = struct.unpack('>Q', msg[11:19])[0]
+            buy_sell = msg[19:20]
+            shares = struct.unpack('>I', msg[20:24])[0]
+            price = struct.unpack('>I', msg[32:36])[0]
+            orders[order_ref] = (buy_sell, price)
+            while not ring.write((
+                Action.ADD, timestamp, ts_recv, msg_seq, order_ref, shares,
+                Side.BID if buy_sell == b'B' else Side.ASK, stock_locate, price
+            )):
+                pass
 
-        while not( ring.write(
-                    (Action.EXECUTE, 
-                     msg.timestamp, 
-                     ts_recv, sequence, 
-                     msg.order_reference_number, 
-                     msg.executed_shares, 
-                     255, # no bid/side ask for executed message
-                     msg.stock_locate, 
-                     msg.execution_price) # no price for executed message
-                )):
-            pass
+        elif msg_type == TYPE_E:
+            order_ref = struct.unpack('>Q', msg[11:19])[0]
+            executed_shares = struct.unpack('>I', msg[19:23])[0]
+            side, price = orders[order_ref]
+            while not ring.write((
+                Action.EXECUTE, timestamp, ts_recv, msg_seq, order_ref, executed_shares,
+                Side.BID if side == b'B' else Side.ASK, stock_locate, price
+            )):
+                pass
 
-    @handle_message.register(OrderExecutedMessage)
-    def _(msg, sequence, ts_recv):
-        side, price = orders[msg.order_reference_number]
-        while not( ring.write(
-                    (Action.EXECUTE, 
-                        msg.timestamp, 
-                        ts_recv, sequence, 
-                        msg.order_reference_number, 
-                        msg.executed_shares, 
-                        Side.BID if side == b"B" else Side.ASK, # no bid/side ask for executed message
-                        msg.stock_locate, 
-                        price) # no price for executed message
-                )):
-            pass              
+        elif msg_type == TYPE_C:
+            order_ref = struct.unpack('>Q', msg[11:19])[0]
+            executed_shares = struct.unpack('>I', msg[19:23])[0]
+            exec_price = struct.unpack('>I', msg[32:36])[0]
+            while not ring.write((
+                Action.EXECUTE, timestamp, ts_recv, msg_seq, order_ref, executed_shares,
+                255, stock_locate, exec_price
+            )):
+                pass
 
-    @handle_message.register(OrderCancelMessage)
-    def _(msg, sequence, ts_recv):
-        while not ( ring.write(
-                    (Action.CANCEL, 
-                    msg.timestamp, 
-                    ts_recv, sequence, 
-                    msg.order_reference_number, 
-                    msg.cancelled_shares, 
-                    255, # no bid/side ask for cancelled message
-                    msg.stock_locate, 
-                    -1) # no price for cancelled message
-                )):
-            pass
-    
- 
-    @handle_message.register(OrderReplaceMessage)
-    def _(msg, sequence, ts_recv):
+        elif msg_type == TYPE_X:
+            order_ref = struct.unpack('>Q', msg[11:19])[0]
+            cancelled_shares = struct.unpack('>I', msg[19:23])[0]
+            while not ring.write((
+                Action.CANCEL, timestamp, ts_recv, msg_seq, order_ref, cancelled_shares,
+                255, stock_locate, -1
+            )):
+                pass
 
-        side, _ = orders[msg.order_reference_number]
-        orders[msg.new_order_reference_number] = (side, _)
-        del orders[msg.order_reference_number]
-        while not (ring.write(
-                        (Action.R_CANCEL, 
-                            msg.timestamp, 
-                            ts_recv, sequence, 
-                            msg.order_reference_number, 
-                            0, # no old quantity for replaced-cancelled message 
-                            Side.BID if side == b"B" else Side.ASK, # no bid/side ask for replaced-cancelled message
-                            msg.stock_locate, 
-                            0) # no price for replaced-cancelled message
-                    )):
-            pass
-       
-        while not (ring.write(
-                            (Action.R_ADD, 
-                             msg.timestamp, 
-                             ts_recv, sequence, 
-                             msg.new_order_reference_number, 
-                             msg.shares, 
-                             Side.BID if side == b"B" else Side.ASK, # no bid/side ask for replaced-cancelled message
-                             msg.stock_locate, 
-                             msg.price)
-                        )):
-            pass
-        
+        elif msg_type == TYPE_D:
+            order_ref = struct.unpack('>Q', msg[11:19])[0]
+            del orders[order_ref]
+            while not ring.write((
+                Action.DELETE, timestamp, ts_recv, msg_seq, order_ref, 0,
+                255, stock_locate, 0
+            )):
+                pass
 
-    @handle_message.register(OrderDeleteMessage)
-    def _(msg, sequence, ts_recv):
-        
-        del orders[msg.order_reference_number]
-        while not (ring.write(
-                    (Action.DELETE, 
-                        msg.timestamp, 
-                        ts_recv, sequence, 
-                        msg.order_reference_number, 
-                        0, # no quantity for deleted orders 
-                        255, # no bid/side ask for deleted orders
-                        msg.stock_locate, 
-                        0) # no price for deleted orders
-                )):
-            pass
-       
-
-    
-    expected_sequence = 1
+        elif msg_type == TYPE_U:
+            old_ref = struct.unpack('>Q', msg[11:19])[0]
+            new_ref = struct.unpack('>Q', msg[19:27])[0]
+            shares = struct.unpack('>I', msg[27:31])[0]
+            price = struct.unpack('>I', msg[31:35])[0]
+            side, _ = orders[old_ref]
+            orders[new_ref] = (side, price)
+            del orders[old_ref]
+            side_val = Side.BID if side == b'B' else Side.ASK
+            while not ring.write((
+                Action.R_CANCEL, timestamp, ts_recv, msg_seq, old_ref, 0,
+                side_val, stock_locate, 0
+            )):
+                pass
+            while not ring.write((
+                Action.R_ADD, timestamp, ts_recv, msg_seq, new_ref, shares,
+                side_val, stock_locate, price
+            )):
+                pass
 
     def parse_and_apply(sequence, count, packet, ts_recv, offset):
         nonlocal expected_sequence
-        messages = []
         pos = HEADER_SIZE
-        for _ in range(count):
+        for i in range(count):
             (length,) = struct.unpack(MSG_LEN_FORMAT, packet[pos:pos + MSG_LEN_SIZE])
             pos += MSG_LEN_SIZE
-            messages.append(packet[pos:pos + length])
+            msg = packet[pos:pos + length]
             pos += length
 
-        for i, message in enumerate(messages[offset:], start=offset):
-            msg_sequence = sequence + i
-            message_type = parser.get_message_type(message)
-            handle_message(message_type, msg_sequence, ts_recv)
+            if i < offset:
+                continue
+
+            handle_message(msg, sequence + i, ts_recv)
 
         expected_sequence = sequence + count
+
+    expected_sequence = 1
 
     REQUEST_FORMAT = '>10sQH'  
     def build_request(session, sequence, count):
@@ -234,6 +194,14 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
 
         offset = expected_sequence - sequence
         parse_and_apply(sequence, count, packet, ts_recv, offset)
+
+        if expected_sequence % 25000 < 11:
+            cursor_count = int(ring.consumer_count[0])
+            cursors = [(i, int(ring.cursors[i]), bool(ring.gating_flags[i])) for i in range(cursor_count)]
+            for i in range(cursor_count):
+                print(f"consumer {i}: gating={bool(ring.gating_flags[i])}, cursor={int(ring.cursors[i])}")
+            print(f"seq={expected_sequence}, queue={raw_queue.qsize()}, write={int(ring.write_seq[0])}, cursors={cursors}")
+
         while expected_sequence in pending:
             buf_ts_recv, buf_packet = pending.pop(expected_sequence)
             _, buf_seq, buf_count = struct.unpack(HEADER_FORMAT, buf_packet[:HEADER_SIZE])
@@ -246,18 +214,30 @@ def main():
     manager = multiprocessing.Manager()
     instrument_map = manager.dict()
     capacity = 262144  
-    shm_size =  8 + 8 + (MAX_CONSUMERS * 8) + MAX_CONSUMERS + (capacity * EVENT.itemsize)
+    shm_size = 8 + 8 + (MAX_CONSUMERS * 8) + MAX_CONSUMERS + (capacity * EVENT.itemsize)
     shm = shared_memory.SharedMemory(create=True, size=shm_size)
     shm.buf[:] = b'\x00' * shm_size
-    raw_queue = multiprocessing.Queue()
 
+    ring = Ring(shm, capacity)
+    book_id = ring.register(gating=True, name="Order book")
+    trade_relay_id = ring.register(gating=True, name="Trade relay")
+    logger_id = ring.register(gating=False, name="Logger")
+
+
+    trade_shm_size = 8 + (TRADE_BUFFER_SIZE * TRADE_DTYPE.itemsize)  # 8 bytes for write counter
+    trade_shm = shared_memory.SharedMemory(
+        name=TRADE_SHM_NAME, create=True, size=trade_shm_size
+    )
+    trade_shm.buf[:] = b'\x00' * trade_shm_size
+
+    raw_queue = multiprocessing.Queue()
 
     snapshot_size = MAX_INSTRUMENTS * SNAPSHOT_DTYPE.itemsize
     snapshot_shm = shared_memory.SharedMemory(
         name=SNAPSHOT_SHM_NAME, create=True, size=snapshot_size
     )
     snapshot_shm.buf[:] = b'\x00' * snapshot_size
-    
+
     receiver_process = multiprocessing.Process(target=receiver, args=(raw_queue,), daemon=True)
     processor_process = multiprocessing.Process(
         target=processor, 
@@ -265,20 +245,20 @@ def main():
     )
     consumer_process = multiprocessing.Process(
         target=consumer, 
-        args=(shm.name, capacity, instrument_map)
+        args=(shm.name, capacity, instrument_map, book_id)
     )
     logger_process = multiprocessing.Process(
         target=logger,
-        args=(shm.name, capacity, instrument_map)
+        args=(shm.name, capacity, instrument_map, logger_id)
     )
     trade_queue = multiprocessing.Queue()
     trade_relay_process = multiprocessing.Process(
         target=trade_relay,
-        args=(shm.name, capacity, trade_queue)
+        args=(shm.name, capacity, trade_relay_id)
     )
     ws_process = multiprocessing.Process(
         target=ws_server,
-        args=(trade_queue, instrument_map)
+        args=(instrument_map,)
     )
     receiver_process.start()
     processor_process.start()
