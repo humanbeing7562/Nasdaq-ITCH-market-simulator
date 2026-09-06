@@ -1,7 +1,7 @@
 import struct 
 import numpy as np
 HOST = ""
-IP = "172.30.201.15"
+IP = "127.0.0.1"
 PORT = 30000
 MSG_LEN_FORMAT = ">H"
 HEADER_SIZE = 20

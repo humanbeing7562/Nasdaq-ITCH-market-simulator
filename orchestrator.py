@@ -15,6 +15,9 @@ def kill_all_python():
     )
     time.sleep(2)
 
+import os
+import signal
+
 def run_cycle():
     print(f"\n{'='*50}")
     print(f"Starting new replay cycle at {time.strftime('%H:%M:%S')}")
@@ -23,6 +26,7 @@ def run_cycle():
     feed_handler = subprocess.Popen(
         [sys.executable, "feed_handler.py"],
         cwd=os.path.dirname(os.path.abspath(__file__)) or ".",
+        preexec_fn=os.setsid,
     )
 
     time.sleep(3)
@@ -39,18 +43,13 @@ def run_cycle():
     time.sleep(DRAIN_TIME)
 
     print("Stopping all processes...")
-    print("Cycle complete.\n")
-
-
-def main():
-    print("Orchestrator started. Ctrl+C to stop.")
+    os.killpg(os.getpgid(feed_handler.pid), signal.SIGTERM)
+    time.sleep(2)
     try:
-        while True:
-            run_cycle()
-            print(f"Pausing {PAUSE_BETWEEN}s before next cycle...")
-            time.sleep(PAUSE_BETWEEN)
-    except KeyboardInterrupt:
-        print("\nOrchestrator stopped.")
+        os.killpg(os.getpgid(feed_handler.pid), signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    print("Cycle complete.\n")
 
 
 if __name__ == "__main__":

@@ -122,7 +122,7 @@ def broadcast(itch_file_path=itch_file_path, speed=50):
     first_ts = None
     start_perf = None
 
-    for sequence, packet, ts_event in read_and_pack_raw(itch_file_path, batch_size=3):
+    for sequence, packet, ts_event in read_and_pack_raw(itch_file_path, batch_size=1):
         if first_ts is None:
             first_ts = ts_event
             start_perf = time.perf_counter_ns()

@@ -51,7 +51,7 @@ def receiver(raw_queue):
     sock.bind((HOST, PORT))
     mreq = socket.inet_aton("229.0.0.1") + socket.inet_aton(IP)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8 << 20)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 32 << 20)
     print("Listening now...")
     while True:
         packet = sock.recv(1500)
@@ -219,7 +219,7 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
         offset = expected_sequence - sequence
         parse_and_apply(sequence, count, packet, ts_recv, offset)
 
-        if expected_sequence % 50000 < 4:
+        if expected_sequence % 50000 < 1:
             cursor_count = int(ring.consumer_count[0])
             cursors = [(i, int(ring.cursors[i]), bool(ring.gating_flags[i])) for i in range(cursor_count)]
             print(f"seq={expected_sequence}, queue={raw_queue.qsize()}, write={int(ring.write_seq[0])}, cursors={cursors}")
@@ -254,7 +254,7 @@ def main():
     ring.depends_on[:] = -1
     book_id = ring.register(gating=True, name="Order book")
     trade_relay_id = ring.register(gating=True, name="Trade relay", depends_on=book_id)
-    logger_id = ring.register(gating=False, name="Logger")
+    # logger_id = ring.register(gating=False, name="Logger")
 
 
     trade_ring_capacity = 65536
@@ -275,7 +275,7 @@ def main():
         multiprocessing.Process(target=receiver, args=(raw_queue,), daemon=True),
         multiprocessing.Process(target=processor, args=(raw_queue, shm.name, capacity, instrument_map)),
         multiprocessing.Process(target=consumer, args=(shm.name, capacity, instrument_map, book_id)),
-        multiprocessing.Process(target=logger, args=(shm.name, capacity, instrument_map, logger_id)),
+        # multiprocessing.Process(target=logger, args=(shm.name, capacity, instrument_map, logger_id)),
         multiprocessing.Process(target=trade_relay, args=(shm.name, capacity, trade_relay_id, trade_ring_shm.name, trade_ring_capacity)),
         multiprocessing.Process(target=ws_server, args=(trade_ring_shm.name, trade_ring_capacity, ws_consumer_id, instrument_map))
     ]
