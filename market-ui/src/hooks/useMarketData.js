@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 const PRICE_SCALE = 10000;
+const wsUrl = `ws://${window.location.host}/ws`;
 
-export function useMarketData(url = 'ws://localhost:8765') {
+export function useMarketData(url = wsUrl) {
   const [book, setBook] = useState({});
   const [trades, setTrades] = useState([]);
   const [symbols, setSymbols] = useState([]);
