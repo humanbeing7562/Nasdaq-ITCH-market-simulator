@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 const PRICE_SCALE = 10000;
 
@@ -10,30 +10,43 @@ export function useMarketData(url = 'ws://localhost:8765') {
   const wsRef = useRef(null);
   const symbolsRef = useRef(new Set());
 
-  useEffect(() => {
+  const connect = useCallback(() => {
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
     ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
+
+    ws.onclose = () => {
+      setConnected(false);
+      // clear stale data from previous cycle
+      setBook({});
+      setTrades([]);
+      setSymbols([]);
+      symbolsRef.current = new Set();
+      // reconnect after 2 seconds
+      setTimeout(connect, 2000);
+    };
 
     ws.onmessage = (event) => {
-      console.log('HOOK received:', event.data.slice(0, 200));
       const msg = JSON.parse(event.data);
 
-      if (msg.type === 'trade') {
-        const trade = {
-          symbol: msg.symbol,
-          price: msg.price / PRICE_SCALE,
-          quantity: msg.quantity,
-          time: msg.ts_event,
-        };
-        setTrades(prev => [...prev, trade]);
+      if (msg.type === 'trade_batch') {
+        const newTrades = msg.trades.map(t => ({
+          symbol: t.symbol,
+          price: t.price / PRICE_SCALE,
+          quantity: t.quantity,
+          time: t.ts_event,
+        }));
+        setTrades(prev => [...prev, ...newTrades]);
 
-        if (!symbolsRef.current.has(msg.symbol)) {
-          symbolsRef.current.add(msg.symbol);
-          setSymbols(Array.from(symbolsRef.current).sort());
+        let changed = false;
+        for (const t of msg.trades) {
+          if (!symbolsRef.current.has(t.symbol)) {
+            symbolsRef.current.add(t.symbol);
+            changed = true;
+          }
         }
+        if (changed) setSymbols(Array.from(symbolsRef.current).sort());
       } else if (msg.type === 'book_update') {
         const updated = {};
         for (const b of msg.books) {
@@ -49,28 +62,16 @@ export function useMarketData(url = 'ws://localhost:8765') {
           };
         }
         setBook(prev => ({ ...prev, ...updated }));
-      } else if (msg.type === 'trade_batch') {
-          const newTrades = msg.trades.map(t => ({
-            symbol: t.symbol,
-            price: t.price / PRICE_SCALE,
-            quantity: t.quantity,
-            time: t.ts_event,
-          }));
-          setTrades(prev => [...prev, ...newTrades]);
-
-          let changed = false;
-          for (const t of msg.trades) {
-            if (!symbolsRef.current.has(t.symbol)) {
-              symbolsRef.current.add(t.symbol);
-              changed = true;
-            }
-          }
-          if (changed) setSymbols(Array.from(symbolsRef.current).sort());
       }
     };
-
-    return () => ws.close();
   }, [url]);
+
+  useEffect(() => {
+    connect();
+    return () => {
+      if (wsRef.current) wsRef.current.close();
+    };
+  }, [connect]);
 
   return { trades, book, symbols, connected };
 }

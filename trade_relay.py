@@ -34,5 +34,5 @@ def trade_relay(shm_name, capacity, consumer_id, trade_ring_shm_name, trade_ring
             pass
 
         count += 1
-        if count % 1000 == 0:
-            print(f"TRADES: {count} relayed, trade_ring write_seq={int(trade_ring.write_seq[0])}")
+        # if count % 1000 == 0:
+        #     print(f"TRADES: {count} relayed, trade_ring write_seq={int(trade_ring.write_seq[0])}")

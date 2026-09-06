@@ -115,7 +115,7 @@ def retransmit_server(bind_ip=IP):
                 print(f"  no stored packet for {seq} (not withheld, or already gone)")
 
 
-def broadcast(itch_file_path=itch_file_path, speed=100):
+def broadcast(itch_file_path=itch_file_path, speed=1000):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
     sock.bind((IP, 0))
@@ -125,7 +125,7 @@ def broadcast(itch_file_path=itch_file_path, speed=100):
     first_ts = None
     start_perf = None
 
-    for sequence, packet, ts_event in read_and_pack_raw(itch_file_path, batch_size=10):
+    for sequence, packet, ts_event in read_and_pack_raw(itch_file_path, batch_size=5):
         if first_ts is None:
             first_ts = ts_event
             start_perf = time.perf_counter_ns()

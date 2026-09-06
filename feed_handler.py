@@ -15,12 +15,36 @@ from order_book import consumer
 from logger import logger
 from trade_relay import trade_relay
 from ws_server import ws_server
+import gc
 
 HOST = ""
 PORT = 30000
 
 MSG_LEN_FORMAT = ">H"
 HEADER_SIZE = 20
+
+def create_or_replace_shm(name, size):
+    try:
+        old = shared_memory.SharedMemory(name=name, create=False)
+        old.close()
+        old.unlink()
+        time.sleep(0.5)
+    except Exception:
+        pass
+    return shared_memory.SharedMemory(name=name, create=True, size=size)
+
+def get_shm(name, size):
+    try:
+        shm = shared_memory.SharedMemory(name=name, create=True, size=size)
+    except FileExistsError:
+        shm = shared_memory.SharedMemory(name=name, create=False)
+        if shm.size < size:
+            shm.close()
+            shm.unlink()
+            time.sleep(0.5)
+            shm = shared_memory.SharedMemory(name=name, create=True, size=size)
+    shm.buf[:size] = b'\x00' * size
+    return shm
 
 def receiver(raw_queue):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -195,7 +219,7 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
         offset = expected_sequence - sequence
         parse_and_apply(sequence, count, packet, ts_recv, offset)
 
-        if expected_sequence % 10000 < 11:
+        if expected_sequence % 50000 < 6:
             cursor_count = int(ring.consumer_count[0])
             cursors = [(i, int(ring.cursors[i]), bool(ring.gating_flags[i])) for i in range(cursor_count)]
             print(f"seq={expected_sequence}, queue={raw_queue.qsize()}, write={int(ring.write_seq[0])}, cursors={cursors}")
@@ -209,6 +233,18 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
 
     
 def main():
+    print("Initializing system and cleaning up old handles...")
+    gc.collect()
+    for name in [SNAPSHOT_SHM_NAME, TRADE_SHM_NAME]:
+        try:
+            old = shared_memory.SharedMemory(name=name, create=False)
+            old.close()
+            old.unlink()
+        except FileNotFoundError as e:
+            print(f"{e}")
+        except Exception:
+            time.sleep(0.1)
+
     manager = multiprocessing.Manager()
     instrument_map = manager.dict()
     capacity = 262144  
@@ -225,7 +261,7 @@ def main():
 
     trade_ring_capacity = 65536
     trade_ring_size = 8 + 8 + (MAX_CONSUMERS * 8) + MAX_CONSUMERS + (MAX_CONSUMERS * 8) + (trade_ring_capacity * EVENT.itemsize)
-    trade_ring_shm = shared_memory.SharedMemory(create=True, size=trade_ring_size)
+    trade_ring_shm = get_shm(TRADE_SHM_NAME, trade_ring_size)
     trade_ring_shm.buf[:] = b'\x00' * trade_ring_size
 
     trade_ring = Ring(trade_ring_shm, trade_ring_capacity)
@@ -234,39 +270,44 @@ def main():
     raw_queue = multiprocessing.Queue()
 
     snapshot_size = MAX_INSTRUMENTS * SNAPSHOT_DTYPE.itemsize
-    snapshot_shm = shared_memory.SharedMemory(
-        name=SNAPSHOT_SHM_NAME, create=True, size=snapshot_size
-    )
+    snapshot_shm = get_shm(SNAPSHOT_SHM_NAME, snapshot_size)
     snapshot_shm.buf[:] = b'\x00' * snapshot_size
 
-    receiver_process = multiprocessing.Process(target=receiver, args=(raw_queue,), daemon=True)
-    processor_process = multiprocessing.Process(
-        target=processor, 
-        args=(raw_queue, shm.name, capacity, instrument_map)
-    )
-    consumer_process = multiprocessing.Process(
-        target=consumer, 
-        args=(shm.name, capacity, instrument_map, book_id)
-    )
-    logger_process = multiprocessing.Process(
-        target=logger,
-        args=(shm.name, capacity, instrument_map, logger_id)
-    )
-    trade_relay_process = multiprocessing.Process(
-        target=trade_relay,
-        args=(shm.name, capacity, trade_relay_id, trade_ring_shm.name, trade_ring_capacity)
-    )
-    ws_process = multiprocessing.Process(
-        target=ws_server,
-        args=(trade_ring_shm.name, trade_ring_capacity, ws_consumer_id, instrument_map)
-    )
-    receiver_process.start()
-    processor_process.start()
-    consumer_process.start()
-    logger_process.start()
-    trade_relay_process.start()
-    ws_process.start()
-    receiver_process.join()
+    processes = [
+        multiprocessing.Process(target=receiver, args=(raw_queue,), daemon=True),
+        multiprocessing.Process(target=processor, args=(raw_queue, shm.name, capacity, instrument_map)),
+        multiprocessing.Process(target=consumer, args=(shm.name, capacity, instrument_map, book_id)),
+        multiprocessing.Process(target=logger, args=(shm.name, capacity, instrument_map, logger_id)),
+        multiprocessing.Process(target=trade_relay, args=(shm.name, capacity, trade_relay_id, trade_ring_shm.name, trade_ring_capacity)),
+        multiprocessing.Process(target=ws_server, args=(trade_ring_shm.name, trade_ring_capacity, ws_consumer_id, instrument_map))
+    ]
+
+    for p in processes:
+        p.start()
+    try:
+        processes[0].join()
+    except (KeyboardInterrupt, SystemExit):
+        pass
+    finally:
+        for p in processes:
+            if p.is_alive():
+                p.terminate()
+
+        for p in processes:
+            p.join(timeout=3)
+
+        time.sleep(1.5)
+
+        shm.close()
+        snapshot_shm.close()
+        trade_ring_shm.close()
+        try:
+            shm.unlink()
+            snapshot_shm.unlink()
+            trade_ring_shm.unlink()
+        except Exception as e:
+            print(f"Warning during unlinking: {e}")
+        print("All processes stopped, shared memory cleaned up.")
 
        
 if __name__ == "__main__":

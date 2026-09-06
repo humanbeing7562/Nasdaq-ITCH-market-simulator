@@ -6,6 +6,13 @@ from ring_buffer import Ring
 from constants import *
 import numpy as np
 
+trade_history = []
+
+async def handle_client(ws):
+    if trade_history:
+        msg = json.dumps({"type": "trade_batch", "trades": trade_history})
+        await ws.send(msg)
+    await ws.wait_closed()
 
 async def broadcast_trades(server, trade_ring, ws_consumer_id, instrument_map):
     while True:
@@ -28,7 +35,8 @@ async def broadcast_trades(server, trade_ring, ws_consumer_id, instrument_map):
 
         if not batch:
             continue  # keep the loop going
-            
+
+        trade_history.extend(batch)
         msg = json.dumps({"type": "trade_batch", "trades": batch})
         clients = list(server.connections)
         if clients:
@@ -100,7 +108,7 @@ async def run(trade_ring_shm_name, trade_ring_capacity, ws_consumer_id, instrume
     trade_shm = shared_memory.SharedMemory(name=trade_ring_shm_name, create=False)
     trade_ring = Ring(trade_shm, trade_ring_capacity)
 
-    async with websockets.serve(lambda ws: ws.wait_closed(), host, port, origins=None) as server:
+    async with websockets.serve(handle_client, host, port, origins=None) as server:
         print(f"WebSocket server running on ws://{host}:{port}")
         await asyncio.gather(
             broadcast_trades(server, trade_ring, ws_consumer_id, instrument_map),
