@@ -219,7 +219,7 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
         offset = expected_sequence - sequence
         parse_and_apply(sequence, count, packet, ts_recv, offset)
 
-        if expected_sequence % 50000 < 1:
+        if expected_sequence % 50000 < 6:
             cursor_count = int(ring.consumer_count[0])
             cursors = [(i, int(ring.cursors[i]), bool(ring.gating_flags[i])) for i in range(cursor_count)]
             print(f"seq={expected_sequence}, queue={raw_queue.qsize()}, write={int(ring.write_seq[0])}, cursors={cursors}")
