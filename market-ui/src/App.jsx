@@ -54,7 +54,16 @@ export default function App() {
           </div>
         </div>
       </header>
-
+      {connected && trades.length === 0 && (
+        <div style={{
+          textAlign: 'center',
+          color: '#555',
+          padding: '20px',
+          fontSize: '14px',
+        }}>
+          Pre-market session loading — trades start at ~04:00 AM ET
+        </div>
+      )}
       <main className="panels">
         <div className="chart-panel">
           <Chart trades={trades} symbol={selectedSymbol} interval={interval} />
