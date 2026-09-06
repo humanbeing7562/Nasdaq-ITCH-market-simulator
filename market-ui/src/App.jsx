@@ -1,0 +1,68 @@
+import { useState } from 'react';
+import { useMarketData } from './hooks/useMarketData';
+import Chart from './components/Chart';
+import Ladder from './components/Ladder';
+
+const INTERVALS = [
+  { label: '1s', value: 1 },
+  { label: '5s', value: 5 },
+  { label: '30s', value: 30 },
+  { label: '1m', value: 60 },
+  { label: '5m', value: 300 },
+];
+
+export default function App() {
+  const { trades, book, symbols, connected } = useMarketData();
+  const [selectedSymbol, setSelectedSymbol] = useState(null);
+  const [interval, setInterval] = useState(60);
+
+  // auto-select first symbol when it appears
+  if (!selectedSymbol && symbols.length > 0) {
+    setSelectedSymbol(symbols[0]);
+  }
+
+  return (
+    <div className="app">
+      <header className="toolbar">
+        <div className="toolbar-left">
+          <h1>Market Data Feed</h1>
+          <span className={`status ${connected ? 'on' : 'off'}`}>
+            {connected ? 'LIVE' : 'DISCONNECTED'}
+          </span>
+        </div>
+
+        <div className="toolbar-right">
+          <select
+            value={selectedSymbol || ''}
+            onChange={e => setSelectedSymbol(e.target.value)}
+          >
+            {symbols.map(s => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+
+          <div className="interval-picker">
+            {INTERVALS.map(i => (
+              <button
+                key={i.value}
+                className={interval === i.value ? 'active' : ''}
+                onClick={() => setInterval(i.value)}
+              >
+                {i.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      <main className="panels">
+        <div className="chart-panel">
+          <Chart trades={trades} symbol={selectedSymbol} interval={interval} />
+        </div>
+        <div className="ladder-panel">
+          <Ladder book={book} symbol={selectedSymbol} />
+        </div>
+      </main>
+    </div>
+  );
+}

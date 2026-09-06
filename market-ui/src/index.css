@@ -1,0 +1,205 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  background: #0d0d1a;
+  color: #e0e0e0;
+}
+
+.app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* toolbar */
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  background: #1a1a2e;
+  border-bottom: 1px solid #2a2a3e;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.toolbar-left h1 {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.status {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 3px;
+  letter-spacing: 1px;
+}
+
+.status.on {
+  color: #00c853;
+  background: rgba(0, 200, 83, 0.15);
+}
+
+.status.off {
+  color: #ff1744;
+  background: rgba(255, 23, 68, 0.15);
+}
+
+select {
+  background: #0d0d1a;
+  color: #e0e0e0;
+  border: 1px solid #2a2a3e;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.interval-picker {
+  display: flex;
+  gap: 2px;
+}
+
+.interval-picker button {
+  background: #0d0d1a;
+  color: #888;
+  border: 1px solid #2a2a3e;
+  padding: 5px 10px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.interval-picker button:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.interval-picker button:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.interval-picker button.active {
+  background: #2a2a3e;
+  color: #e0e0e0;
+  border-color: #3a3a5e;
+}
+
+/* panels */
+.panels {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.chart-panel {
+  flex: 1;
+  padding: 12px;
+  min-width: 0;
+  height: 100%;
+}
+
+.ladder-panel {
+  width: 320px;
+  border-left: 1px solid #2a2a3e;
+  overflow-y: auto;
+}
+
+/* ladder */
+.ladder {
+  padding: 8px;
+}
+
+.ladder.empty {
+  padding: 20px;
+  text-align: center;
+  color: #555;
+}
+
+.ladder-header {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 8px 8px;
+  font-size: 11px;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border-bottom: 1px solid #2a2a3e;
+  margin-bottom: 4px;
+}
+
+.ladder-row {
+  display: flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: 13px;
+  height: 26px;
+}
+
+.price-cell {
+  flex: 0 0 100px;
+  text-align: center;
+  font-weight: 600;
+}
+
+.ask-price {
+  color: #ff1744;
+}
+
+.bid-price {
+  color: #00c853;
+}
+
+.qty-cell {
+  flex: 1;
+  position: relative;
+  text-align: right;
+  padding: 0 4px;
+}
+
+.qty-text {
+  position: relative;
+  z-index: 1;
+  font-size: 12px;
+  color: #aaa;
+}
+
+.qty-bar {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  border-radius: 2px;
+}
+
+.bid .qty-bar {
+  right: 0;
+}
+
+.ask .qty-bar {
+  left: 0;
+}
+
+.bid-bar {
+  background: rgba(0, 200, 83, 0.15);
+}
+
+.ask-bar {
+  background: rgba(255, 23, 68, 0.15);
+}

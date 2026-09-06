@@ -195,11 +195,9 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
         offset = expected_sequence - sequence
         parse_and_apply(sequence, count, packet, ts_recv, offset)
 
-        if expected_sequence % 25000 < 11:
+        if expected_sequence % 10000 < 11:
             cursor_count = int(ring.consumer_count[0])
             cursors = [(i, int(ring.cursors[i]), bool(ring.gating_flags[i])) for i in range(cursor_count)]
-            for i in range(cursor_count):
-                print(f"consumer {i}: gating={bool(ring.gating_flags[i])}, cursor={int(ring.cursors[i])}")
             print(f"seq={expected_sequence}, queue={raw_queue.qsize()}, write={int(ring.write_seq[0])}, cursors={cursors}")
 
         while expected_sequence in pending:
@@ -214,21 +212,24 @@ def main():
     manager = multiprocessing.Manager()
     instrument_map = manager.dict()
     capacity = 262144  
-    shm_size = 8 + 8 + (MAX_CONSUMERS * 8) + MAX_CONSUMERS + (capacity * EVENT.itemsize)
+    shm_size = 8 + 8 + (MAX_CONSUMERS * 8) + MAX_CONSUMERS + (MAX_CONSUMERS * 8) + (capacity * EVENT.itemsize)
     shm = shared_memory.SharedMemory(create=True, size=shm_size)
     shm.buf[:] = b'\x00' * shm_size
 
     ring = Ring(shm, capacity)
+    ring.depends_on[:] = -1
     book_id = ring.register(gating=True, name="Order book")
-    trade_relay_id = ring.register(gating=True, name="Trade relay")
+    trade_relay_id = ring.register(gating=True, name="Trade relay", depends_on=book_id)
     logger_id = ring.register(gating=False, name="Logger")
 
 
-    trade_shm_size = 8 + (TRADE_BUFFER_SIZE * TRADE_DTYPE.itemsize)  # 8 bytes for write counter
-    trade_shm = shared_memory.SharedMemory(
-        name=TRADE_SHM_NAME, create=True, size=trade_shm_size
-    )
-    trade_shm.buf[:] = b'\x00' * trade_shm_size
+    trade_ring_capacity = 65536
+    trade_ring_size = 8 + 8 + (MAX_CONSUMERS * 8) + MAX_CONSUMERS + (MAX_CONSUMERS * 8) + (trade_ring_capacity * EVENT.itemsize)
+    trade_ring_shm = shared_memory.SharedMemory(create=True, size=trade_ring_size)
+    trade_ring_shm.buf[:] = b'\x00' * trade_ring_size
+
+    trade_ring = Ring(trade_ring_shm, trade_ring_capacity)
+    ws_consumer_id = trade_ring.register(gating=True, name="WS trade consumer")
 
     raw_queue = multiprocessing.Queue()
 
@@ -251,14 +252,13 @@ def main():
         target=logger,
         args=(shm.name, capacity, instrument_map, logger_id)
     )
-    trade_queue = multiprocessing.Queue()
     trade_relay_process = multiprocessing.Process(
         target=trade_relay,
-        args=(shm.name, capacity, trade_relay_id)
+        args=(shm.name, capacity, trade_relay_id, trade_ring_shm.name, trade_ring_capacity)
     )
     ws_process = multiprocessing.Process(
         target=ws_server,
-        args=(instrument_map,)
+        args=(trade_ring_shm.name, trade_ring_capacity, ws_consumer_id, instrument_map)
     )
     receiver_process.start()
     processor_process.start()

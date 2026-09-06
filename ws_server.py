@@ -2,49 +2,40 @@ import asyncio
 import json
 import websockets
 from multiprocessing import shared_memory
+from ring_buffer import Ring
 from constants import *
 import numpy as np
 
 
-async def broadcast_trades(server, trade_shm, instrument_map):
-    write_seq = np.ndarray(1, dtype=np.uint64, buffer=trade_shm.buf[0:8])
-    trades = np.ndarray(TRADE_BUFFER_SIZE, dtype=TRADE_DTYPE, buffer=trade_shm.buf[8:])
-    mask = TRADE_BUFFER_SIZE - 1
-
-    read_pos = int(write_seq[0])
-
+async def broadcast_trades(server, trade_ring, ws_consumer_id, instrument_map):
     while True:
         await asyncio.sleep(0.05)
-
-        current_write = int(write_seq[0])
-        if current_write == read_pos:
-            continue
-
-        # if we fell behind more than buffer size, jump forward
-        if current_write - read_pos > TRADE_BUFFER_SIZE:
-            read_pos = current_write - TRADE_BUFFER_SIZE
-
+        # print(f"WS poll: trade_ring write_seq={int(trade_ring.write_seq[0])}, read_pos={ws_consumer_id}, cursor={int(trade_ring.cursors[ws_consumer_id])}")
         batch = []
-        while read_pos < current_write and len(batch) < 1000:
-            slot = read_pos & mask
-            t = trades[slot]
-            symbol = instrument_map.get(int(t['instrument_id']), str(int(t['instrument_id'])))
+        while len(batch) < 1000:
+            result = trade_ring.read(ws_consumer_id)
+            if result is None:
+                break
+
+            instrument_id = int(result['instrument_id'])
+            symbol = instrument_map.get(instrument_id, str(instrument_id))
             batch.append({
                 "symbol": symbol,
-                "price": int(t['price']),
-                "quantity": int(t['quantity']),
-                "ts_event": int(t['ts_event']),
+                "price": int(result['price']),
+                "quantity": int(result['quantity']),
+                "ts_event": int(result['ts_event']),
             })
-            read_pos += 1
 
-        if batch:
-            msg = json.dumps({"type": "trade_batch", "trades": batch})
-            clients = list(server.connections)
-            if clients:
-                await asyncio.gather(
-                    *[client.send(msg) for client in clients],
-                    return_exceptions=True
-                )
+        if not batch:
+            continue  # keep the loop going
+            
+        msg = json.dumps({"type": "trade_batch", "trades": batch})
+        clients = list(server.connections)
+        if clients:
+            await asyncio.gather(
+                *[client.send(msg) for client in clients],
+                return_exceptions=True
+            )
 
 
 async def broadcast_snapshots(server, snapshots, instrument_map):
@@ -86,7 +77,7 @@ async def broadcast_snapshots(server, snapshots, instrument_map):
 
 def read_snapshot(snapshots, instrument_id):
     slot = snapshots[instrument_id]
-    seq1 = int(slot['seqlock'])
+    seq1 = int(slot['seqlock']) 
     if seq1 % 2 == 1:
         return None
     data = {
@@ -102,19 +93,20 @@ def read_snapshot(snapshots, instrument_id):
     return data
 
 
-async def run(instrument_map, host="0.0.0.0", port=8765):
+async def run(trade_ring_shm_name, trade_ring_capacity, ws_consumer_id, instrument_map, host="0.0.0.0", port=8765):
     snapshot_shm = shared_memory.SharedMemory(name=SNAPSHOT_SHM_NAME, create=False)
     snapshots = np.ndarray(MAX_INSTRUMENTS, dtype=SNAPSHOT_DTYPE, buffer=snapshot_shm.buf)
 
-    trade_shm = shared_memory.SharedMemory(name=TRADE_SHM_NAME, create=False)
+    trade_shm = shared_memory.SharedMemory(name=trade_ring_shm_name, create=False)
+    trade_ring = Ring(trade_shm, trade_ring_capacity)
 
     async with websockets.serve(lambda ws: ws.wait_closed(), host, port, origins=None) as server:
         print(f"WebSocket server running on ws://{host}:{port}")
         await asyncio.gather(
-            broadcast_trades(server, trade_shm, instrument_map),
+            broadcast_trades(server, trade_ring, ws_consumer_id, instrument_map),
             broadcast_snapshots(server, snapshots, instrument_map),
         )
 
 
-def ws_server(instrument_map):
-    asyncio.run(run(instrument_map))
+def ws_server(trade_ring_shm_name, trade_ring_capacity, ws_consumer_id, instrument_map):
+    asyncio.run(run(trade_ring_shm_name, trade_ring_capacity, ws_consumer_id, instrument_map))

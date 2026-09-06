@@ -4,14 +4,12 @@ from constants import *
 import numpy as np
 
 
-def trade_relay(shm_name, capacity, consumer_id):
+def trade_relay(shm_name, capacity, consumer_id, trade_ring_shm_name, trade_ring_capacity):
     shm = shared_memory.SharedMemory(name=shm_name, create=False)
     ring = Ring(shm, capacity)
 
-    trade_shm = shared_memory.SharedMemory(name=TRADE_SHM_NAME, create=False)
-    write_seq = np.ndarray(1, dtype=np.uint64, buffer=trade_shm.buf[0:8])
-    trades = np.ndarray(TRADE_BUFFER_SIZE, dtype=TRADE_DTYPE, buffer=trade_shm.buf[8:])
-    mask = TRADE_BUFFER_SIZE - 1
+    trade_shm = shared_memory.SharedMemory(name=trade_ring_shm_name, create=False)
+    trade_ring = Ring(trade_shm, trade_ring_capacity)
 
     count = 0
     while True:
@@ -22,13 +20,19 @@ def trade_relay(shm_name, capacity, consumer_id):
         if result["action"] != Action.EXECUTE:
             continue
 
-        slot = write_seq[0] & mask
-        trades[slot]['instrument_id'] = result['instrument_id']
-        trades[slot]['price'] = result['price']
-        trades[slot]['quantity'] = result['quantity']
-        trades[slot]['ts_event'] = result['ts_event']
-        write_seq[0] += 1
+        while not trade_ring.write((
+            result["action"],
+            result["ts_event"],
+            result["ts_recv"],
+            result["sequence"],
+            result["order_id"],
+            result["quantity"],
+            result["side"],
+            result["instrument_id"],
+            result["price"],
+        )):
+            pass
 
         count += 1
-        if count % 100_000 == 0:
-            print(f"TRADES: {count} relayed")
+        if count % 1000 == 0:
+            print(f"TRADES: {count} relayed, trade_ring write_seq={int(trade_ring.write_seq[0])}")

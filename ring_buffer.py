@@ -15,17 +15,19 @@ EVENT = np.dtype([
 cursor_start = 16
 cursor_end = cursor_start + MAX_CONSUMERS * 8
 flag_end = cursor_end + MAX_CONSUMERS
+dep_end = flag_end + MAX_CONSUMERS * 8
 
 class Ring:
     def __init__(self, shm, capacity):
         if not (capacity > 0 and (capacity & (capacity - 1)) == 0):
-            raise ValueError("Capacity should be a power of two to simplify memory initialization")
+            raise ValueError("Capacity should be a power of two")
         self.capacity = capacity
-        self.write_seq = np.ndarray(1, dtype=np.uint64, buffer=shm.buf[0:8]) # need ndarray here because uint64 alone wont be mutable.
-        self.consumer_count = np.ndarray(1, dtype=np.uint64, buffer=shm.buf[8:16]) # need ndarray here because uint64 alone wont be mutable.
+        self.write_seq = np.ndarray(1, dtype=np.uint64, buffer=shm.buf[0:8])
+        self.consumer_count = np.ndarray(1, dtype=np.uint64, buffer=shm.buf[8:16])
         self.cursors = np.ndarray(MAX_CONSUMERS, dtype=np.uint64, buffer=shm.buf[cursor_start:cursor_end])
         self.gating_flags = np.ndarray(MAX_CONSUMERS, dtype=np.uint8, buffer=shm.buf[cursor_end:flag_end])
-        self.ring = np.ndarray(capacity, dtype=EVENT, buffer=shm.buf[flag_end:])
+        self.depends_on = np.ndarray(MAX_CONSUMERS, dtype=np.int64, buffer=shm.buf[flag_end:dep_end])
+        self.ring = np.ndarray(capacity, dtype=EVENT, buffer=shm.buf[dep_end:])
         self.mask = capacity - 1
         self.shm = shm
         self._cached_min_gated = 0
@@ -38,10 +40,11 @@ class Ring:
                 min_gated = min(min_gated, self.cursors[i])
         return min_gated
 
-    def register(self, gating=False, name=""):
+    def register(self, gating=False, name="", depends_on=None):
         idx = self.consumer_count[0]
         self.consumer_count[0] += 1
         self.gating_flags[idx] = 1 if gating else 0
+        self.depends_on[idx] = depends_on if depends_on is not None else -1
         self.cursors[idx] = self.write_seq[0] 
         print(f"{name} has been registered as consumer")
         return int(idx)
@@ -60,6 +63,12 @@ class Ring:
 
     def read(self, consumer_id):
         cursor = self.cursors[consumer_id]
+        
+        dep = int(self.depends_on[consumer_id])
+        if dep != -1:
+            if cursor >= self.cursors[dep]:
+                return None
+
         write_pos = self.write_seq[0]
 
         if cursor >= write_pos:
