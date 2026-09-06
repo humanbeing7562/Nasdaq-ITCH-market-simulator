@@ -36,12 +36,13 @@ def run_cycle():
         cwd=os.path.dirname(os.path.abspath(__file__)) or ".",
     )
 
-    try:
-        broadcaster.wait(timeout=60)
-    except subprocess.TimeoutExpired:
-        broadcaster.kill()
-        broadcaster.wait()
-        print("Broadcaster killed after timeout")
+    broadcaster.wait()
+    # try:
+    #     broadcaster.wait(timeout=60)
+    # except subprocess.TimeoutExpired:
+    #     broadcaster.kill()
+    #     broadcaster.wait()
+    #     print("Broadcaster killed after timeout")
         
     print(f"\nBroadcaster finished at {time.strftime('%H:%M:%S')}")
 
