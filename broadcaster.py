@@ -17,7 +17,7 @@ RETRANSMIT_PORT = 30001
 BROKEN_SEQUENCES = set() # {50, 120, 121, 123, 125}   # hardcoded, withheld on purpose
 broken_packets = {}                  
 BOOK_TYPES = {b'A', b'F', b'E', b'C', b'X', b'D', b'U', b'P', b'Q', b'B', b'R'}
-
+MARKET_SKIP_NS = 57_540_000_000_000
 def read_and_pack_raw(itch_file_path, batch_size=5):
     BOOK_TYPES = {ord('A'), ord('F'), ord('E'), ord('C'), ord('X'), ord('D'), ord('U'), ord('P'), ord('Q'), ord('B'), ord('R')}
     WATCH_SYMBOLS = {b'SPY     ', b'AAPL    ', b'MSFT    ', b'NVDA    ', b'TSLA    ', b'AMD     ', b'QQQ     ', b'AMZN    '}
@@ -126,6 +126,9 @@ def broadcast(itch_file_path=itch_file_path, speed=50):
         if first_ts is None:
             first_ts = ts_event
             start_perf = time.perf_counter_ns()
+
+        if ts_event < MARKET_SKIP_NS:
+            continue
         
         target = start_perf + (ts_event - first_ts) // speed
         spin_wait_until(target)
