@@ -26,7 +26,7 @@ def run_cycle():
     feed_handler = subprocess.Popen(
         [sys.executable, "feed_handler.py"],
         cwd=os.path.dirname(os.path.abspath(__file__)) or ".",
-        preexec_fn=os.setsid,
+        preexec_fn=os.setsid,  # create a new process group
     )
 
     time.sleep(3)
@@ -50,6 +50,17 @@ def run_cycle():
     except ProcessLookupError:
         pass
     print("Cycle complete.\n")
+
+
+def main():
+    print("Orchestrator started. Ctrl+C to stop.")
+    try:
+        while True:
+            run_cycle()
+            print(f"Pausing {PAUSE_BETWEEN}s before next cycle...")
+            time.sleep(PAUSE_BETWEEN)
+    except KeyboardInterrupt:
+        print("\nOrchestrator stopped.")
 
 
 if __name__ == "__main__":
