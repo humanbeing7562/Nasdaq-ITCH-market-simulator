@@ -34,6 +34,8 @@ def run_cycle():
     broadcaster = subprocess.Popen(
         [sys.executable, "broadcaster.py"],
         cwd=os.path.dirname(os.path.abspath(__file__)) or ".",
+        stdout=sys.stdout,
+        stderr=sys.stderr,
     )
 
     broadcaster.wait()
