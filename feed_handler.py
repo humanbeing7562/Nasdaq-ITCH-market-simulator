@@ -51,7 +51,7 @@ def receiver(raw_queue):
     sock.bind((HOST, PORT))
     mreq = socket.inet_aton("229.0.0.1") + socket.inet_aton(IP)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 20)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8 << 20)
     print("Listening now...")
     while True:
         packet = sock.recv(1500)
@@ -219,7 +219,7 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
         offset = expected_sequence - sequence
         parse_and_apply(sequence, count, packet, ts_recv, offset)
 
-        if expected_sequence % 50000 < 6:
+        if expected_sequence % 50000 < 4:
             cursor_count = int(ring.consumer_count[0])
             cursors = [(i, int(ring.cursors[i]), bool(ring.gating_flags[i])) for i in range(cursor_count)]
             print(f"seq={expected_sequence}, queue={raw_queue.qsize()}, write={int(ring.write_seq[0])}, cursors={cursors}")
