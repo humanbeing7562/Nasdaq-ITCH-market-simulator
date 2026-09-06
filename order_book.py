@@ -118,7 +118,7 @@ def consumer(shm_name, capacity, instrument_map, consumer_id):
 
     snapshot_shm, snapshots = attach_snapshot_shm()
     last_publish = time.monotonic()
-    WATCH_SYMBOLS = {'SPY', 'AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMD', 'QQQ', 'AMZN'}
+    WATCH_SYMBOLS = {'SPY', 'AAPL', 'NVDA', 'AMD', 'AMZN'}
     watched_ids = set()
     skipped_ids = set()
 

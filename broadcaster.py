@@ -3,12 +3,14 @@ import socket
 import threading
 from itch.parser import MessageParser
 from constants import *
+from collections import OrderedDict
 
 parser = MessageParser()
 MESSAGE_COUNT = 1
 SESSION_ID = b"0020190130"
 itch_file_path = 'data/01302019.NASDAQ_ITCH50'
-
+recent_packets = OrderedDict()
+MAX_WINDOW = 50000
 HEADER_FORMAT = ">10sQH"
 BODY_FORMAT = ">H"
 REQUEST_FORMAT = ">10sQH"
@@ -20,7 +22,7 @@ BOOK_TYPES = {b'A', b'F', b'E', b'C', b'X', b'D', b'U', b'P', b'Q', b'B', b'R'}
 MARKET_SKIP_NS = 57_540_000_000_000
 def read_and_pack_raw(itch_file_path, batch_size=5):
     BOOK_TYPES = {ord('A'), ord('F'), ord('E'), ord('C'), ord('X'), ord('D'), ord('U'), ord('P'), ord('Q'), ord('B'), ord('R')}
-    WATCH_SYMBOLS = {b'SPY     ', b'AAPL    ', b'MSFT    ', b'NVDA    ', b'TSLA    ', b'AMD     ', b'QQQ     ', b'AMZN    '}
+    WATCH_SYMBOLS = {b'SPY     ', b'AAPL    ', b'NVDA    ', b'AMD     ', b'AMZN    '}
 
     with open(itch_file_path, 'rb') as f:
         pos = 0
@@ -105,11 +107,11 @@ def retransmit_server(bind_ip=IP):
         session, start_seq, count = struct.unpack(REQUEST_FORMAT, data)
         print(f"retransmit request: start={start_seq} count={count} from {addr}")
         for seq in range(start_seq, start_seq + count):
-            packet = broken_packets.get(seq)
+            packet = recent_packets.get(seq) or broken_packets.get(seq)
             if packet is not None:
                 sock.sendto(packet, addr)
             else:
-                print(f"  no stored packet for {seq} (not withheld, or already gone)")
+                print(f"  no stored packet for {seq} (not in window)")
 
 
 def broadcast(itch_file_path=itch_file_path, speed=50):
@@ -135,6 +137,10 @@ def broadcast(itch_file_path=itch_file_path, speed=50):
             continue   # dont send to main feed, trigger sequence gap branch.
 
         sock.sendto(packet, ("229.0.0.1", 30000))
+
+        recent_packets[sequence] = packet
+        if len(recent_packets) > MAX_WINDOW:
+            recent_packets.popitem(last=False)
 
     print("SESSION ENDED!")
 
