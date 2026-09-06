@@ -1,7 +1,6 @@
 
 from multiprocessing import shared_memory
 from ring_buffer import Ring
-from sortedcontainers import SortedDict
 from constants import * 
 import time
 import numpy as np

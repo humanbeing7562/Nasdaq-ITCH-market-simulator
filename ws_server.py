@@ -7,12 +7,16 @@ from constants import *
 import numpy as np
 
 trade_history = []
-
+connected_clients = set()
 async def handle_client(ws):
-    if trade_history:
-        msg = json.dumps({"type": "trade_batch", "trades": trade_history})
-        await ws.send(msg)
-    await ws.wait_closed()
+    connected_clients.add(ws)
+    try:
+        if trade_history:
+            msg = json.dumps({"type": "trade_batch", "trades": trade_history})
+            await ws.send(msg)
+        await ws.wait_closed()
+    finally:
+        connected_clients.discard(ws)
 
 async def broadcast_trades(server, trade_ring, ws_consumer_id, instrument_map):
     while True:
@@ -38,7 +42,7 @@ async def broadcast_trades(server, trade_ring, ws_consumer_id, instrument_map):
 
         trade_history.extend(batch)
         msg = json.dumps({"type": "trade_batch", "trades": batch})
-        clients = list(server.connections)
+        clients = list(connected_clients)
         if clients:
             await asyncio.gather(
                 *[client.send(msg) for client in clients],
@@ -50,7 +54,7 @@ async def broadcast_snapshots(server, snapshots, instrument_map):
     while True:
         await asyncio.sleep(0.2)
 
-        clients = list(server.connections)
+        clients = list(connected_clients)
         if not clients:
             continue
 

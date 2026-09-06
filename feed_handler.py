@@ -233,8 +233,6 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
 
     
 def main():
-    print("Initializing system and cleaning up old handles...")
-    gc.collect()
     for name in [SNAPSHOT_SHM_NAME, TRADE_SHM_NAME]:
         try:
             old = shared_memory.SharedMemory(name=name, create=False)
@@ -261,7 +259,7 @@ def main():
 
     trade_ring_capacity = 65536
     trade_ring_size = 8 + 8 + (MAX_CONSUMERS * 8) + MAX_CONSUMERS + (MAX_CONSUMERS * 8) + (trade_ring_capacity * EVENT.itemsize)
-    trade_ring_shm = get_shm(TRADE_SHM_NAME, trade_ring_size)
+    trade_ring_shm = shared_memory.SharedMemory(name=TRADE_SHM_NAME, create=True, size=trade_ring_size)
     trade_ring_shm.buf[:] = b'\x00' * trade_ring_size
 
     trade_ring = Ring(trade_ring_shm, trade_ring_capacity)
@@ -270,7 +268,7 @@ def main():
     raw_queue = multiprocessing.Queue()
 
     snapshot_size = MAX_INSTRUMENTS * SNAPSHOT_DTYPE.itemsize
-    snapshot_shm = get_shm(SNAPSHOT_SHM_NAME, snapshot_size)
+    snapshot_shm = shared_memory.SharedMemory(name=SNAPSHOT_SHM_NAME, create=True, size=snapshot_size)
     snapshot_shm.buf[:] = b'\x00' * snapshot_size
 
     processes = [
