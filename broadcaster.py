@@ -18,60 +18,57 @@ BROKEN_SEQUENCES = set() # {50, 120, 121, 123, 125}   # hardcoded, withheld on p
 broken_packets = {}                  
 BOOK_TYPES = {b'A', b'F', b'E', b'C', b'X', b'D', b'U', b'P', b'Q', b'B', b'R'}
 
-def read_and_pack_raw(itch_file_path, batch_size=20):
+def read_and_pack_raw(itch_file_path, batch_size=5):
     BOOK_TYPES = {ord('A'), ord('F'), ord('E'), ord('C'), ord('X'), ord('D'), ord('U'), ord('P'), ord('Q'), ord('B'), ord('R')}
     WATCH_SYMBOLS = {b'SPY     ', b'AAPL    ', b'MSFT    ', b'NVDA    ', b'TSLA    ', b'AMD     ', b'QQQ     ', b'AMZN    '}
 
     with open(itch_file_path, 'rb') as f:
-        data = f.read()
+        pos = 0
+        sequence = 0
+        batch_bodies = []
+        batch_start_seq = 1
+        batch_ts = 0
+        watched_locates = set()
 
-    pos = 0
-    sequence = 0
-    batch_bodies = []
-    batch_start_seq = 1
-    batch_ts = 0
-    watched_locates = set()
+        while True:
+            length_bytes = f.read(2)
+            if len(length_bytes) < 2:
+                break
+            length = int.from_bytes(length_bytes, 'big')
+            msg_bytes = f.read(length)
+            if len(msg_bytes) < length:
+                break
 
-    while pos + 2 <= len(data):
-        length = int.from_bytes(data[pos:pos+2], 'big')
-        pos += 2
-        if pos + length > len(data):
-            break
-        msg_bytes = data[pos:pos+length]
-        pos += length
-
-        if msg_bytes[0] == ord('R'):
-            symbol = msg_bytes[11:19]
-            if symbol in WATCH_SYMBOLS:
-                locate = int.from_bytes(msg_bytes[1:3], 'big')
-                watched_locates.add(locate)
-                # fall through to send it
-            else:
+            if msg_bytes[0] == ord('R'):
+                symbol = msg_bytes[11:19]
+                if symbol in WATCH_SYMBOLS:
+                    locate = int.from_bytes(msg_bytes[1:3], 'big')
+                    watched_locates.add(locate)
+                else:
+                    continue
+            elif msg_bytes[0] not in BOOK_TYPES:
                 continue
+            else:
+                locate = int.from_bytes(msg_bytes[1:3], 'big')
+                if locate not in watched_locates:
+                    continue
 
-        if msg_bytes[0] not in BOOK_TYPES:
-            continue
+            sequence += 1
 
-        locate = int.from_bytes(msg_bytes[1:3], 'big')
-        if locate not in watched_locates:
-            continue
+            if len(batch_bodies) == 0:
+                batch_start_seq = sequence
+                batch_ts = int.from_bytes(msg_bytes[5:11], 'big')
 
-        sequence += 1
+            batch_bodies.append(struct.pack(BODY_FORMAT, length) + msg_bytes)
 
-        if len(batch_bodies) == 0:
-            batch_start_seq = sequence
-            batch_ts = int.from_bytes(msg_bytes[5:11], 'big')
+            if len(batch_bodies) >= batch_size:
+                header = struct.pack(HEADER_FORMAT, SESSION_ID, batch_start_seq, len(batch_bodies))
+                yield batch_start_seq, header + b''.join(batch_bodies), batch_ts
+                batch_bodies = []
 
-        batch_bodies.append(struct.pack(BODY_FORMAT, length) + msg_bytes)
-
-        if len(batch_bodies) >= batch_size:
+        if batch_bodies:
             header = struct.pack(HEADER_FORMAT, SESSION_ID, batch_start_seq, len(batch_bodies))
             yield batch_start_seq, header + b''.join(batch_bodies), batch_ts
-            batch_bodies = []
-
-    if batch_bodies:
-        header = struct.pack(HEADER_FORMAT, SESSION_ID, batch_start_seq, len(batch_bodies))
-        yield batch_start_seq, header + b''.join(batch_bodies), batch_ts
 
 def read_and_pack(itch_file_path=itch_file_path):
     with open(itch_file_path, 'rb') as itch_file:
