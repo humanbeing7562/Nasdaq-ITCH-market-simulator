@@ -193,3 +193,66 @@ Running day-by-day log of what's actually been built, not a study plan. New entr
 - Feed handler `orders` cleanup on partial execution.
 
 **Status:** Full pipeline live from UDP multicast through to browser console. Trade events and MBP-10 book snapshots streaming over WebSocket. Frontend visualization is the next milestone.
+
+
+## 2026-09-05 - 2026-09-06 — Performance optimization, dependency chaining, React/Vite frontend, AWS deployment
+
+### Performance Optimization
+
+**Raw byte parsing in broadcaster.** Replaced `parser.parse_file()` + `to_bytes()` with direct byte reads from the ITCH file. The old approach constructed a full Python object per message then immediately serialized it back to bytes — pure waste. The new version reads raw bytes, checks `msg_bytes[0]` for the message type, extracts the timestamp at bytes 5–11 with `int.from_bytes`, and wraps the untouched bytes in the MoldUDP64 header. Also loaded the entire file into memory with `f.read()` to eliminate millions of per-message `f.read(2)` + `f.read(length)` syscalls. Later reverted to streaming reads for EC2 deployment where RAM is limited.
+
+**Raw byte parsing in processor.** Replaced `MessageParser.get_message_type()` + `singledispatch` with `msg[0]` byte checks and `struct.unpack` at known ITCH offsets. The parser was constructing typed Python objects (`AddOrderMessage`, `OrderDeleteMessage`, etc.) per message, then singledispatch did a type registry lookup to find the handler. New version: one byte comparison, a few `struct.unpack` calls, no object allocation. Same principle as the design doc's SBE argument — the fastest way to handle a message is to not parse it.
+
+**SortedDict → plain dict in book builder.** Every add/cancel/delete was paying O(log n) for SortedDict tree operations. Replaced with plain `dict` for O(1) hash table insert/delete, with `best_bid`/`best_ask` tracked explicitly. `max()`/`min()` rescan only fires when the best level empties — infrequent relative to total events. Sorting moved to `publish_snapshots` every 200ms with `sorted()` — O(n log n) but only runs 5 times per second per instrument on the cold path.
+
+**Manager dict IPC elimination.** The book builder was calling `instrument_map.get(instrument_id)` on every event to check the watchlist. `instrument_map` is a `Manager().dict()` — every `.get()` is an IPC round-trip through a socket to the manager process. Queue depth was growing at 50k+ per 100k messages. Fixed by caching the first lookup per `instrument_id` into local sets (`watched_ids` / `skipped_ids`). Subsequent checks are pure local set membership tests. This was the single biggest surprise bottleneck.
+
+**Message batching in broadcaster.** `batch_size` parameter packs multiple ITCH messages into a single MoldUDP64 packet. Reduces `sendto()` syscalls proportionally. The receiver already handled `message_count > 1` in `parse_and_apply`. Tradeoff: pacing granularity is per-batch rather than per-message.
+
+**BOOK_TYPES filter in broadcaster.** Only sends book-relevant message types (A, F, E, C, X, D, U, P, Q, B, R). Skips system events, reg SHO indicators, LULD bands, MWCB — millions of messages the book never touches.
+
+### Architecture Changes
+
+**Shared memory trade buffer replacing multiprocessing.Queue.** Trade relay writes to a numpy structured array in shared memory; ws_server polls it every 50ms. Eliminated pickle serialization per trade that was causing the ws_server to fall hours behind. Then replaced the custom buffer with a second Ring instance (trade ring) to inherit lapping/torn-read protection through gating.
+
+**`depends_on` dependency chaining.** Added `depends_on` field to Ring consumer registration. A consumer registered with `depends_on=book_id` can only read events the book builder has already processed. Two-line addition to `read()`: check the dependency's cursor, return `None` if not behind it yet. The trade relay uses this to guarantee consistency between the trade stream and book snapshots — structural, not accidental. This is the LMAX Disruptor's dependency graph pattern.
+
+**Consumer registration moved to main().** Was racing — each consumer called `ring.register()` inside its own process after `.start()`. `consumer_count` read-and-increment isn't atomic across processes, so two processes could grab the same index and overwrite each other's gating flags. Order book ended up non-gating and trade relay ended up gating — exactly backwards. Fixed by registering all consumers in `main()` before starting any processes, passing `consumer_id` as function arguments.
+
+**WebSocket trade batching.** ws_server sends up to 1000 trades per WebSocket message (`trade_batch` type) instead of one per message. Fewer frames, fewer React state updates, fewer re-renders.
+
+**Trade backfill on connect.** ws_server keeps `trade_history` list in memory. On client connection, sends the full history as one `trade_batch`. New visitors or reconnecting browsers get all bars immediately.
+
+**Retransmit window.** Broadcaster now stores the last 50,000 packets in an `OrderedDict`. Retransmit server looks up from this window when the receiver requests gap recovery. Previously only stored intentionally broken packets — real packet loss (which we experienced on both WSL and EC2) was unrecoverable.
+
+### React Frontend (Module 3b, Part 3)
+
+Built the full visualization layer:
+
+- **useMarketData.js** — WebSocket hook managing `trades`, `book`, `symbols`, `connected` state. Handles `trade_batch` and `book_update` message types. Auto-reconnects on close with state cleanup for cycle transitions.
+- **Chart.jsx** — Lightweight Charts candlestick chart with volume histogram. `aggregateBars` aggregates raw trades into OHLCV bars client-side. Crosshair subscriber shows O/H/L/C/V on hover. Timestamps converted from ITCH nanoseconds-since-midnight to Unix epoch with `BASE_DATE`.
+- **Ladder.jsx** — MBP-10 price ladder with asks reversed so best ask sits above the spread. Proportional quantity bars normalized to `maxQty` across all visible levels.
+- **App.jsx** — Toolbar with symbol dropdown (auto-selects first symbol), interval picker (1s/5s/30s/1m/5m), connection status indicator.
+
+### Deployment
+
+**EC2 setup.** Deployed on t3.xlarge (4 vCPUs, 16GB) in us-east-1. t2.medium (2 vCPUs) couldn't sustain real-time processing — the book builder and receiver competed for CPU time, causing both queue growth and UDP packet loss. The 4-vCPU instance resolved the CPU contention.
+
+**Nginx.** Serves React static build (`npm run build` → `dist/`) on port 80. Reverse-proxies `/ws` to the Python WebSocket server on port 8765. `proxy_read_timeout 86400` keeps WebSocket connections alive.
+
+**Orchestrator.** Runs broadcaster and feed_handler as subprocesses. Waits for broadcaster to finish, drains for N seconds, then kills the entire process group with `os.killpg` (using `preexec_fn=os.setsid` to create process groups). Pauses, then restarts. Full cycle is ~90 minutes at replay speed.
+
+**Shared memory cleanup.** `finally` block in feed_handler terminates all child processes, joins with timeout, then closes and unlinks all three named shared memory segments. Startup routine attempts to unlink any stale segments from crashed previous runs. Windows required extensive workarounds (`gc.collect`, retry loops, sleep delays); Linux `unlink()` works immediately.
+
+**Multicast on Linux.** Required `sudo ip link set lo multicast on` and `sudo ip route add 224.0.0.0/4 dev lo` — not enabled by default on Ubuntu. Added to `/etc/rc.local` for persistence across reboots.
+
+**UDP buffer sizing.** Increased kernel UDP receive buffer to 16MB (`sysctl net.core.rmem_max`) and socket buffer to 8MB. Default 212KB overflows in milliseconds during the 9:29 AM pre-open burst even with only 5 watched symbols.
+
+### Bugs
+
+- **Lightweight Charts API change.** `chart.addCandlestickSeries()` replaced with `chart.addSeries(CandlestickSeries, {...})` in v5.
+- **Chart height zero on mount.** `containerRef.current.clientHeight` is 0 before flexbox layout computes. Fixed with `style={{ height: '100%' }}` on the container div.
+- **ITCH timestamps are nanoseconds since midnight, not Unix epoch.** Lightweight Charts expects Unix seconds. Added `BASE_DATE` (midnight UTC of the ITCH file date) to the conversion.
+- **React StrictMode double-mounting.** Opened and immediately closed the WebSocket, confusing the server. Removed StrictMode.
+- **`websockets` library version differences.** `server.connections` attribute doesn't exist in v13.1. Switched to manual client tracking with `connected_clients` set.
+- **EC2 spot instances can't be stopped for resize.** One-time spot instances must be terminated. Preserved the EBS volume and attached to a new instance (or re-uploaded).
