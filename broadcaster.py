@@ -126,9 +126,6 @@ def broadcast(itch_file_path=itch_file_path, speed=50):
         if first_ts is None:
             first_ts = ts_event
             start_perf = time.perf_counter_ns()
-
-        if ts_event < MARKET_SKIP_NS:
-            continue
         
         target = start_perf + (ts_event - first_ts) // speed
         spin_wait_until(target)

@@ -162,8 +162,6 @@ def consumer(shm_name, capacity, instrument_map, consumer_id):
 
         elif result['action'] == Action.EXECUTE:
             order_id = result['order_id']
-            if order_id not in orders:
-                continue
             order = orders[order_id]
             executed_qty = result['quantity']
             book = books[order['instrument']]
@@ -175,8 +173,6 @@ def consumer(shm_name, capacity, instrument_map, consumer_id):
 
         elif result['action'] == Action.CANCEL:
             order_id = result['order_id']
-            if order_id not in orders:
-                continue
             order = orders[order_id]
             cancelled_qty = result['quantity']
             book = books[order['instrument']]
@@ -188,8 +184,6 @@ def consumer(shm_name, capacity, instrument_map, consumer_id):
 
         elif result['action'] == Action.DELETE:
             order_id = result['order_id']
-            if order_id not in orders:
-                continue
             order = orders[order_id]
             remaining_qty = order['quantity']
             book = books[order['instrument']]
@@ -198,8 +192,6 @@ def consumer(shm_name, capacity, instrument_map, consumer_id):
 
         elif result['action'] == Action.R_CANCEL:
             order_id = result['order_id']
-            if order_id not in orders:
-                continue
             order = orders[order_id]
             remaining_qty = order['quantity']
             book = books[order['instrument']]

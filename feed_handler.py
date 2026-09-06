@@ -107,8 +107,6 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
 
         elif msg_type == TYPE_E:
             order_ref = struct.unpack('>Q', msg[11:19])[0]
-            if order_ref not in orders:
-                return
             executed_shares = struct.unpack('>I', msg[19:23])[0]
             side, price = orders[order_ref]
             while not ring.write((
@@ -119,8 +117,6 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
 
         elif msg_type == TYPE_C:
             order_ref = struct.unpack('>Q', msg[11:19])[0]
-            if order_ref not in orders:
-                return
             executed_shares = struct.unpack('>I', msg[19:23])[0]
             exec_price = struct.unpack('>I', msg[32:36])[0]
             while not ring.write((
@@ -131,8 +127,6 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
 
         elif msg_type == TYPE_X:
             order_ref = struct.unpack('>Q', msg[11:19])[0]
-            if order_ref not in orders:
-                return
             cancelled_shares = struct.unpack('>I', msg[19:23])[0]
             while not ring.write((
                 Action.CANCEL, timestamp, ts_recv, msg_seq, order_ref, cancelled_shares,
@@ -142,8 +136,6 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
 
         elif msg_type == TYPE_D:
             order_ref = struct.unpack('>Q', msg[11:19])[0]
-            if order_ref not in orders:
-                return
             del orders[order_ref]
             while not ring.write((
                 Action.DELETE, timestamp, ts_recv, msg_seq, order_ref, 0,
@@ -153,8 +145,6 @@ def processor(raw_queue, shm_name, capacity, instrument_map):
 
         elif msg_type == TYPE_U:
             old_ref = struct.unpack('>Q', msg[11:19])[0]
-            if old_ref not in orders:
-                return
             new_ref = struct.unpack('>Q', msg[19:27])[0]
             shares = struct.unpack('>I', msg[27:31])[0]
             price = struct.unpack('>I', msg[31:35])[0]
