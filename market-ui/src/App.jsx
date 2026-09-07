@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMarketData } from './hooks/useMarketData';
 import Chart from './components/Chart';
 import Ladder from './components/Ladder';
+import InfoModal from './components/InfoModal';
 
 const INTERVALS = [
   { label: '1s', value: 1 },
@@ -15,6 +16,7 @@ export default function App() {
   const { trades, book, symbols, connected } = useMarketData();
   const [selectedSymbol, setSelectedSymbol] = useState(null);
   const [interval, setInterval] = useState(60);
+  const [showInfo, setShowInfo] = useState(true);
 
   // auto-select first symbol when it appears
   if (!selectedSymbol && symbols.length > 0) {
@@ -24,11 +26,13 @@ export default function App() {
   return (
     <div className="app">
       <header className="toolbar">
+
         <div className="toolbar-left">
           <h1>Market Data Feed</h1>
           <span className={`status ${connected ? 'on' : 'off'}`}>
             {connected ? 'LIVE' : 'DISCONNECTED'}
           </span>
+          <button className="info-btn" onClick={() => setShowInfo(true)}>ⓘ</button>
         </div>
 
         <div className="toolbar-right">
@@ -72,6 +76,8 @@ export default function App() {
           <Ladder book={book} symbol={selectedSymbol} />
         </div>
       </main>
+
+      {showInfo && <InfoModal onClose={() => setShowInfo(false)} />}
     </div>
   );
 }
