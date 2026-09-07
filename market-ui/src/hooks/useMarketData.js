@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 const PRICE_SCALE = 10000;
-const wsUrl = `ws://${window.location.host}/ws`;
+const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+const wsUrl = `${protocol}//${window.location.host}/ws`;
 
 export function useMarketData(url = wsUrl) {
   const [book, setBook] = useState({});
