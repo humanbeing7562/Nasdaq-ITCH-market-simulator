@@ -26,7 +26,9 @@ def run_cycle():
     feed_handler = subprocess.Popen(
         [sys.executable, "feed_handler.py"],
         cwd=os.path.dirname(os.path.abspath(__file__)) or ".",
-        preexec_fn=os.setsid,  # create a new process group
+        preexec_fn=os.setsid,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
     )
 
     time.sleep(3)
