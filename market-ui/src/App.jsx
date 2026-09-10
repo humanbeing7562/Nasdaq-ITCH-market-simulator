@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useMarketData } from './hooks/useMarketData';
 import Chart from './components/Chart';
 import Ladder from './components/Ladder';
@@ -12,13 +12,23 @@ const INTERVALS = [
   { label: '5m', value: 300 },
 ];
 
+
+
+
 export default function App() {
   const { trades, book, symbols, connected } = useMarketData();
   const [selectedSymbol, setSelectedSymbol] = useState(null);
   const [interval, setInterval] = useState(60);
   const [showInfo, setShowInfo] = useState(true);
 
-  // auto-select first symbol when it appears
+
+  const lastPrice = useMemo(() => {
+    for (let i = trades.length - 1; i >= 0; i--) {
+      if (trades[i].symbol === selectedSymbol) return trades[i].price;
+    }
+    return null;
+  }, [trades, selectedSymbol]);
+  
   if (!selectedSymbol && symbols.length > 0) {
     setSelectedSymbol(symbols[0]);
   }
@@ -55,7 +65,7 @@ export default function App() {
               <option key={s} value={s}>{s}</option>
             ))}
           </select>
-          {trades.length > 0 && (
+          {lastPrice !== null && (
             <span style={{
               color: '#888',
               fontFamily: 'monospace',
@@ -63,7 +73,7 @@ export default function App() {
             }}>
               LTP{' '}
               <span style={{ color: '#0f0', fontSize: 14 }}>
-                ${trades[trades.length - 1].price.toFixed(2)}
+                ${lastPrice.toFixed(2)}
               </span>
             </span>
           )}
