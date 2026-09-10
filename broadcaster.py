@@ -15,6 +15,7 @@ HEADER_FORMAT = ">10sQH"
 BODY_FORMAT = ">H"
 REQUEST_FORMAT = ">10sQH"
 MARKET_OPEN_NS = 34_200_000_000_000
+FAST_FORWARD_UNTIL = 4 * 3600 * 1_000_000_000
 RETRANSMIT_PORT = 30001
 BROKEN_SEQUENCES = set() # {50, 120, 121, 123, 125}   # hardcoded, withheld on purpose
 broken_packets = {}                  
@@ -128,9 +129,10 @@ def broadcast(itch_file_path=itch_file_path, speed=25):
         if first_ts is None:
             first_ts = ts_event
             start_perf = time.perf_counter_ns()
-        
-        target = start_perf + (ts_event - first_ts) // speed
-        spin_wait_until(target)
+
+        if ts_event >= FAST_FORWARD_UNTIL:    
+            target = start_perf + (ts_event - first_ts) // speed
+            spin_wait_until(target)
 
         if sequence in BROKEN_SEQUENCES:
             broken_packets[sequence] = packet

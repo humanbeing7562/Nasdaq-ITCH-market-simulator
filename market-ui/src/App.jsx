@@ -32,6 +32,17 @@ export default function App() {
           <span className={`status ${connected ? 'on' : 'off'}`}>
             {connected ? 'LIVE' : 'DISCONNECTED'}
           </span>
+          <span style={{
+            background: 'rgba(255, 165, 0, 0.15)',
+            border: '1px solid rgba(255, 165, 0, 0.4)',
+            color: '#ffa500',
+            padding: '2px 8px',
+            borderRadius: 4,
+            fontSize: 12,
+            fontFamily: 'monospace',
+          }}>
+            25× speed
+          </span>
           <button className="info-btn" onClick={() => setShowInfo(true)}>ⓘ</button>
         </div>
 
@@ -44,6 +55,18 @@ export default function App() {
               <option key={s} value={s}>{s}</option>
             ))}
           </select>
+          {trades.length > 0 && (
+            <span style={{
+              color: '#888',
+              fontFamily: 'monospace',
+              fontSize: 12,
+            }}>
+              LTP{' '}
+              <span style={{ color: '#0f0', fontSize: 14 }}>
+                ${trades[trades.length - 1].price.toFixed(2)}
+              </span>
+            </span>
+          )}
 
           <div className="interval-picker">
             {INTERVALS.map(i => (
@@ -76,7 +99,7 @@ export default function App() {
           <Ladder book={book} symbol={selectedSymbol} />
         </div>
       </main>
-
+      
       {showInfo && <InfoModal onClose={() => setShowInfo(false)} />}
     </div>
   );
