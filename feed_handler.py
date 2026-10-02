@@ -48,6 +48,7 @@ def get_shm(name, size):
 
 def receiver(raw_queue):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((HOST, PORT))
     mreq = socket.inet_aton("229.0.0.1") + socket.inet_aton(IP)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
