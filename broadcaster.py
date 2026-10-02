@@ -101,6 +101,7 @@ def spin_wait_until(target_ns, threshold_ns=2_000_000):
 
 def retransmit_server(bind_ip=IP):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((bind_ip, RETRANSMIT_PORT))
     print("Retransmit server listening...")
     while True:
