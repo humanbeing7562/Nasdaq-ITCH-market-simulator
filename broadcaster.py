@@ -116,7 +116,7 @@ def retransmit_server(bind_ip=IP):
                 print(f"  no stored packet for {seq} (not in window)")
 
 
-def broadcast(itch_file_path=itch_file_path, speed=25):
+def broadcast(itch_file_path=itch_file_path, speed=5):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
     sock.bind((IP, 0))

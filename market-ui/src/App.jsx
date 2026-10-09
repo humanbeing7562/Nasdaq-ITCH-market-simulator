@@ -51,7 +51,7 @@ export default function App() {
             fontSize: 12,
             fontFamily: 'monospace',
           }}>
-            25× speed
+            5× speed
           </span>
           <button className="info-btn" onClick={() => setShowInfo(true)}>ⓘ</button>
         </div>
